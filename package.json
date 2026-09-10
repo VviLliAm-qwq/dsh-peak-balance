@@ -49,7 +49,8 @@
     "validate:manifest": "node scripts/validate-manifest.mjs",
     "test": "node --test",
     "pack:verify": "node scripts/pack-verify.mjs",
-    "verify": "npm run check:encoding && npm run validate:manifest && npm run test && npm run pack:verify"
+    "verify": "npm run check:encoding && npm run validate:manifest && npm run test && npm run pack:verify",
+    "prepublishOnly": "npm run verify"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
