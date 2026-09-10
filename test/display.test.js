@@ -56,8 +56,24 @@ test('warning mode only arms during a peak window', () => {
   assert.equal(idle.warn, false)
 })
 
-test('the warning color follows the configured palette entry', () => {
-  for (const name of WARN_COLOR_ORDER) {
+test('the diagnostic override previews the peak presentation off-peak', () => {
+  const forced = buildDisplay({
+    atMs: IDLE_AT,
+    lang: 'zh',
+    config: { ...CONFIG, warnOnPeak: true, warnColor: 'purple' },
+    forcePeak: true,
+  })
+  assert.equal(forced.peak, true)
+  assert.equal(forced.warn, true)
+  assert.equal(forced.colorHex, warnColorHex('purple'))
+  assert.match(partText(forced), /phase:⚡ 峰时/)
+  // The countdown still describes the real clock.
+  assert.match(partText(forced), /距峰时 1h00m/)
+  // Without the override the same instant stays off-peak.
+  assert.equal(buildDisplay({ atMs: IDLE_AT, lang: 'zh', config: CONFIG }).peak, false)
+})
+
+test('the warning color follows the configured palette entry', () => {  for (const name of WARN_COLOR_ORDER) {
     const model = buildDisplay({ atMs: PEAK_AT, lang: 'zh', config: { ...CONFIG, warnOnPeak: true, warnColor: name } })
     assert.equal(model.colorHex, warnColorHex(name))
     assert.match(model.colorHex, /^#[0-9A-F]{6}$/)

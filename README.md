@@ -168,6 +168,18 @@ failures), the display model, the status component's element tree, and a full
 `apply()` run against a stubbed Cordis context — including the paths where the
 host services are missing, refuse, or throw.
 
+### Previewing the peak-hour warning
+
+The warning frame only appears inside a real peak window (Mon-Fri
+`09:00-12:00` / `14:00-18:00` Beijing). To preview it at any hour:
+
+```sh
+DSH_PEAK_BALANCE_FORCE_PEAK=1 dsh --profile dsh-tui   # PowerShell: $env:DSH_PEAK_BALANCE_FORCE_PEAK=1
+```
+
+The override changes presentation only — the countdown still describes the real
+clock — and it is off unless the variable is set to `1`/`true`/`yes`/`on`.
+
 ## Listing
 
 This plugin is listed on the dsh-tui plugin market. Market listings are a link

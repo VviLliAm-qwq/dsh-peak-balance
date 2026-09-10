@@ -102,6 +102,16 @@ pnpm pack:verify         # 入口引用到的模块是否都在 files 内
 pnpm verify              # 以上四项依次执行
 ```
 
+### 预览峰时警告效果
+
+警告边框只在真实高峰时段（周一至周五 `09:00-12:00` / `14:00-18:00` 北京时间）出现。想在任意时间预览：
+
+```sh
+DSH_PEAK_BALANCE_FORCE_PEAK=1 dsh --profile dsh-tui   # PowerShell: $env:DSH_PEAK_BALANCE_FORCE_PEAK=1
+```
+
+该开关只改变呈现方式（倒计时仍按真实时钟显示），不设置该变量时完全不生效。
+
 ## 许可
 
 MIT — 见 [LICENSE](LICENSE)。

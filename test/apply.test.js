@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { Config, SETTINGS_NS, apply, balanceStateOf, sanitizeConfig, settingsSection } from '../lib/index.js'
+import { Config, SETTINGS_NS, apply, balanceStateOf, forcePeakFromEnv, sanitizeConfig, settingsSection } from '../lib/index.js'
 import { createFakeReact, treeText } from '../test-support/fake-react.js'
 
 /** A Cordis-context stand-in that records everything the plugin touches. */
@@ -137,6 +137,16 @@ test('sanitizeConfig accepts only known keys and types', () => {
     { showBalance: false, showTurnCost: true, warnOnPeak: true, warnColor: 'purple' },
   )
   assert.equal(sanitizeConfig({ warnColor: 'chartreuse' }).warnColor, 'red')
+})
+
+test('the diagnostic peak override is opt-in and off by default', () => {
+  assert.equal(forcePeakFromEnv({}), false)
+  assert.equal(forcePeakFromEnv({ DSH_PEAK_BALANCE_FORCE_PEAK: '' }), false)
+  assert.equal(forcePeakFromEnv({ DSH_PEAK_BALANCE_FORCE_PEAK: '0' }), false)
+  assert.equal(forcePeakFromEnv({ DSH_PEAK_BALANCE_FORCE_PEAK: 'no' }), false)
+  for (const value of ['1', 'true', 'TRUE', 'yes', 'on', ' 1 ']) {
+    assert.equal(forcePeakFromEnv({ DSH_PEAK_BALANCE_FORCE_PEAK: value }), true, value)
+  }
 })
 
 test('balanceStateOf maps every documented failure to a display state', () => {

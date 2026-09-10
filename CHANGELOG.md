@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-09-10
+
+### Added
+
+- `DSH_PEAK_BALANCE_FORCE_PEAK=1` diagnostic override: renders the peak
+  presentation (and the warning frame) outside a real peak window, so the
+  effect can be previewed without waiting for the next 09:00 Beijing. The
+  countdown keeps describing the real clock, and the switch is off unless the
+  variable is set.
+
 ## [0.1.1] - 2026-09-10
 
 ### Changed
