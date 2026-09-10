@@ -52,17 +52,19 @@ test('v4-pro is billed at flash rates once the route is retired', () => {
   assert.equal(rateCardFor('deepseek-v4-pro', after), FLASH_RATES)
 })
 
-test('bucket cost prices cache hits separately from misses', () => {
-  // 1M input tokens of which 900k hit the cache, plus 100k output.
-  const idle = bucketCostCny(BUCKET(1_000_000, 100_000, 900_000), FLASH_RATES.idle)
-  // 100k miss * 1 + 900k hit * 0.02 + 100k output * 4, per million.
+test('bucket cost prices misses, hits and output as disjoint counts', () => {
+  // 100k cache-miss input + 900k cache-hit input + 100k output.
+  const idle = bucketCostCny(BUCKET(100_000, 100_000, 900_000), FLASH_RATES.idle)
   assert.equal(idle, (100_000 * 1 + 900_000 * 0.02 + 100_000 * 4) / 1_000_000)
 })
 
-test('cache hits can never exceed the input count', () => {
-  const withBogusHits = bucketCostCny(BUCKET(1000, 0, 5000), FLASH_RATES.idle)
-  const withAllHits = bucketCostCny(BUCKET(1000, 0, 1000), FLASH_RATES.idle)
-  assert.equal(withBogusHits, withAllHits)
+test('cache hits are counted in full, not clamped to the miss count', () => {
+  // The provider reports the two input figures separately (its `totalTokens`
+  // is input + cacheRead + output), so a large cache read must not be capped
+  // by a small miss count — clamping here was a real ~2.5x under-price.
+  const withLargeHit = bucketCostCny(BUCKET(1000, 0, 9000), FLASH_RATES.idle)
+  assert.equal(withLargeHit, (1000 * 1 + 9000 * 0.02) / 1_000_000)
+  assert.ok(withLargeHit > bucketCostCny(BUCKET(1000, 0, 0), FLASH_RATES.idle))
 })
 
 test('estimateCostCny prices each bucket with its own tier', () => {

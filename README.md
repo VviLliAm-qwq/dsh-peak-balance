@@ -80,10 +80,18 @@ else — including both weekend days — is off-peak.
 figure is an **estimate**:
 
 ```
-cost = (input − cacheRead) × inputMissRate
-     + cacheRead × inputHitRate
-     + output × outputRate
+cost = inputMissTokens   × inputMissRate
+     + cacheReadTokens   × inputHitRate
+     + outputTokens      × outputRate
 ```
+
+The three input-side figures are **disjoint**: `inputTokens` is the prompt that
+missed the cache, `cacheReadTokens` is the prompt served from cache, and the
+provider's own `totalTokens` is their sum plus the output. Treating the cache
+read as a *subset* of the input (clamping one against the other) under-prices a
+cached turn by several times — measured against a real balance drop on
+2026-09-10, a turn that cost ¥0.20 was estimated at ¥0.03 that way and ¥0.23
+with the formula above.
 
 Each provider usage report is filed into the peak or off-peak bucket using the
 timestamp of the request that produced it, so a turn straddling a price

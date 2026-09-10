@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.8] - 2026-09-10
+
+### Fixed
+
+- **The cost formula under-priced cached turns by several times.** It mirrored
+  the host's estimator and treated `cacheReadTokens` as a subset of
+  `inputTokens` (`(input − cacheRead) × miss + cacheRead × hit`). The provider
+  reports the cache-miss input, the cache-hit input and the output as three
+  *disjoint* counts — its `totalTokens` is their sum, and dsh-tui derives its
+  cache-hit rate from `cacheRead / (input + cacheRead + cacheWrite)` — so
+  clamping one against the other silently dropped most of the miss-priced
+  prompt. Measured against a real balance drop: a turn that cost ¥0.20 was
+  estimated at ¥0.03 before and ¥0.23 after.
+
+### Added
+
+- A regression test pinning the disjoint semantics (a large cache read must not
+  be capped by a small miss count).
+
 ## [0.1.7] - 2026-09-10
 
 ### Changed

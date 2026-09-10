@@ -63,8 +63,10 @@ dsh plugin --profile dsh-tui add file:/到本仓库的绝对路径/dsh-peak-bala
 **花费**：DeepSeek API 只返回 token 用量、不返回金额，因此每轮花费是**估算**：
 
 ```
-费用 = (输入 − 缓存命中) × 未命中单价 + 缓存命中 × 命中单价 + 输出 × 输出单价
+费用 = 未命中输入 token × 未命中单价 + 缓存命中 token × 命中单价 + 输出 token × 输出单价
 ```
+
+三项输入侧数字是**并列不重叠**的：`inputTokens` 是未命中缓存的提示词，`cacheReadTokens` 是命中缓存的部分，服务商返回的 `totalTokens` 正是二者相加再加输出。若把命中量当成输入的**子集**去相减（旧写法），会把带缓存的轮次价格算低数倍 —— 2026-09-10 用真实余额扣减核对：实际扣 ¥0.20 的一轮，旧写法估 ¥0.03，上式估 ¥0.23。
 
 每条用量按其请求发生的时刻落入高峰或空闲桶，跨时段的一轮不会被整体按当前时段计价。内置价目（元/百万 tokens）核对日期 **2026-09-10**，来源为官方[模型 & 价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)页：`deepseek-flash` 空闲 0.02 / 1 / 4，高峰 0.04 / 2 / 8；`deepseek-v4-pro` 空闲 0.15 / 4.5 / 13.5，高峰 0.30 / 9 / 27。旧模型名 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 按 Flash 价计费；`deepseek-v4-pro` 自北京时间 2026-09-14 12:00 起路由到 V4.1-Flash，按 Flash 价计费。价目表未收录的模型显示「费率未知」，只显示 token 而不给错误金额。
 
