@@ -92,16 +92,31 @@ function makeServices(record, overrides = {}) {
 
 const FAKE_SESSION = { id: 'session-1', header: { id: 'session-1' } }
 
-/** Keep balance lookups off the network regardless of the developer's env. */
-function withoutApiKey(body) {
-  const saved = process.env.DEEPSEEK_API_KEY
-  delete process.env.DEEPSEEK_API_KEY
+/** Run `body` with an explicit environment (restored afterwards). */
+function withEnv(overrides, body) {
+  const saved = new Map()
+  for (const [key, value] of Object.entries(overrides)) {
+    saved.set(key, process.env[key])
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
   try {
     body()
   } finally {
-    if (saved === undefined) delete process.env.DEEPSEEK_API_KEY
-    else process.env.DEEPSEEK_API_KEY = saved
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
   }
+}
+
+/**
+ * Keep balance lookups off the network regardless of the developer's env, and
+ * pin the UI language: `resolveLang()` follows `DSH_TUI_LANG` first, so the
+ * assertions below hold on an English CI runner too.
+ */
+function withoutApiKey(body) {
+  withEnv({ DEEPSEEK_API_KEY: undefined, DSH_TUI_LANG: 'zh' }, body)
 }
 
 test('sanitizeConfig accepts only known keys and types', () => {
