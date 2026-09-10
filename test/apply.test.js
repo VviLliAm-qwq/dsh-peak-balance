@@ -174,7 +174,11 @@ test('the settings card declares exactly the four switches', () => {
   assert.deepEqual(Object.keys(defaults).sort(), ['showBalance', 'showTurnCost', 'warnColor', 'warnOnPeak'])
   const written = { ...Config({ showBalance: false, showTurnCost: false, warnOnPeak: true, warnColor: 'cyan' }) }
   assert.deepEqual(written, { showBalance: false, showTurnCost: false, warnOnPeak: true, warnColor: 'cyan' })
-  assert.throws(() => Config({ warnColor: 'chartreuse' }))
+  // A stale color from a hand-edited document is stored as-is and sanitized at
+  // use time, so the namespace still registers (an unavailable card could not
+  // be repaired from the UI).
+  assert.equal(Config({ warnColor: 'chartreuse' }).warnColor, 'chartreuse')
+  assert.equal(sanitizeConfig(Config({ warnColor: 'chartreuse' })).warnColor, 'red')
 })
 
 test('a host without any seam stays inert and never throws', () => {

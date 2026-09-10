@@ -37,6 +37,13 @@ dsh plugin --profile dsh-tui add file:/到本仓库的绝对路径/dsh-peak-bala
 该命令会把 bundle 行追加进 profile 的 `dsh.profile.bundles`。之后在 dsh-tui 内执行 `/restart` 让 profile 载入新行；重启后 `/settings` 即可看到设置卡片。
 
 > 不建议用符号链接（`link:` 或目录联接）方式安装：Node 会按插件的真实路径解析依赖，`@deepseek-ai/*` 必须能从该路径向上找到。`file:` 与 npm 安装都会在 profile 内留下真实目录，这正是宿主期望的布局。
+>
+> 更新本地 `file:` 安装：pnpm 会缓存本地目录依赖，只跑 `add`/`update` **不会**拾取改过的源码。请先升版本号，再卸载重装以刷新 profile 内的副本：
+>
+> ```sh
+> dsh plugin --profile dsh-tui remove dsh-peak-balance
+> dsh plugin --profile dsh-tui add file:/到本仓库的绝对路径/dsh-peak-balance
+> ```
 
 ## 设置项（四项）
 

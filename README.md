@@ -45,6 +45,15 @@ row; the settings card appears under `/settings` immediately after the restart.
 > Node resolves a plugin's real path, and `@deepseek-ai/*` must stay reachable
 > from it. `file:` and npm installs both leave a real directory inside the
 > profile, which is the layout the host expects.
+>
+> Updating a `file:` install: pnpm caches a local directory dependency, so
+> `add`/`update` alone will **not** pick up edited sources. Remove and re-add
+> it (after a version bump) to refresh the profile copy:
+>
+> ```sh
+> dsh plugin --profile dsh-tui remove dsh-peak-balance
+> dsh plugin --profile dsh-tui add file:/absolute/path/to/dsh-peak-balance
+> ```
 
 ## Settings
 
