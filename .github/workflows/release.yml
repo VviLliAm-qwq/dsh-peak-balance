@@ -38,7 +38,16 @@ jobs:
       - run: pnpm pack:verify
 
       - name: Publish to npm
-        run: npm publish --access public --provenance
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          # Idempotent: a version published by hand (npm publish locally) must
+          # not fail the tag run that follows it — the tag still gets its
+          # GitHub Release.
+          if npm view "dsh-peak-balance@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice::dsh-peak-balance@$VERSION is already on npm; skipping publish"
+          else
+            npm publish --access public --provenance
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
