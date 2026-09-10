@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { createStore } from '../lib/store.js'
 import {
   FRAME_MS,
+  VIEW_INDENT_CELLS,
   VIEW_KEY,
   VIEW_MAX_ROWS,
   createStatusView,
@@ -68,9 +69,25 @@ test('the waveform rotates one cell per frame', () => {
 test('off-peak renders a single themed line with no frame', () => {
   const model = buildDisplay({ atMs: beijing(2026, 9, 10, 13, 0), lang: 'zh', config: CONFIG })
   const { tree } = render(model)
-  assert.equal(tree.type, 'Text')
-  assert.equal(tree.props.wrap, 'truncate')
+  assert.equal(tree.type, 'Box')
+  assert.equal(tree.props.flexDirection, 'row')
+  assert.equal(tree.props.paddingLeft, VIEW_INDENT_CELLS)
+  assert.equal(tree.children.length, 1)
+  const line = tree.children[0]
+  assert.equal(line.type, 'Text')
+  assert.equal(line.props.wrap, 'truncate')
   assert.match(treeText(tree), /谷时/)
+})
+
+test('both shapes keep the same one-cell indent above the prompt', () => {
+  const offPeak = render(buildDisplay({ atMs: beijing(2026, 9, 10, 13, 0), lang: 'zh', config: CONFIG }))
+  assert.equal(offPeak.tree.props.paddingLeft, VIEW_INDENT_CELLS)
+
+  const peak = render(buildDisplay({ atMs: beijing(2026, 9, 10, 10, 30), lang: 'zh', config: CONFIG }))
+  // The warning frame shifts as a whole, so its border lands on the same
+  // column as the plain line's first glyph.
+  assert.equal(peak.tree.props.marginLeft, VIEW_INDENT_CELLS)
+  assert.equal(VIEW_INDENT_CELLS, 1)
 })
 
 test('peak + warning renders a three-row pulsing frame', () => {

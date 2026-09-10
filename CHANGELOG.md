@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.6] - 2026-09-10
+
+### Changed
+
+- The contribution is indented by one cell so it lines up with the prompt's own
+  content column instead of hugging the terminal edge. The warning frame shifts
+  as a whole, keeping both shapes on the same column.
+
 ## [0.1.5] - 2026-09-10
 
 ### Fixed
