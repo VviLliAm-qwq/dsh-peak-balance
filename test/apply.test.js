@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { Config, SETTINGS_NS, apply, balanceStateOf, forcePeakFromEnv, sanitizeConfig, settingsSection } from '../lib/index.js'
+import { Config, SETTINGS_NS, apply, balanceStateOf, forcePeakFromEnv, sanitizeConfig, seamServices, settingsSection } from '../lib/index.js'
 import { createFakeReact, treeText } from '../test-support/fake-react.js'
 
 /** A Cordis-context stand-in that records everything the plugin touches. */
@@ -137,6 +137,56 @@ test('sanitizeConfig accepts only known keys and types', () => {
     { showBalance: false, showTurnCost: true, warnOnPeak: true, warnColor: 'purple' },
   )
   assert.equal(sanitizeConfig({ warnColor: 'chartreuse' }).warnColor, 'red')
+})
+
+test('seamServices prefers the strict accessor and falls back to the soft one', () => {
+  const strictOnly = { tag: 'strict' }
+  const softOnly = { tag: 'soft' }
+  const both = [strictOnly, softOnly]
+
+  // Strict answers: it comes first, the soft form is still offered.
+  assert.deepEqual(
+    seamServices({ get: (name, strict) => (strict === false ? softOnly : strictOnly) }, 'x'),
+    both,
+  )
+  // Only the soft form answers (host hid the provider behind a shadow).
+  assert.deepEqual(seamServices({ get: (name, strict) => (strict === false ? softOnly : undefined) }, 'x'), [softOnly])
+  // Neither form answers, and a throwing accessor is contained.
+  assert.deepEqual(seamServices({ get: () => undefined }, 'x'), [])
+  assert.deepEqual(seamServices({ get: () => { throw new Error('nope') } }, 'x'), [])
+  // Identical instances are not offered twice.
+  assert.deepEqual(seamServices({ get: () => strictOnly }, 'x'), [strictOnly])
+})
+
+test('a shadow placeholder that refuses cannot stop the registration', () => {
+  withoutApiKey(() => {
+    const ctx = makeCtx()
+    const record = ctx.__record
+    const working = {
+      register(section) {
+        record.sections.push(section)
+        return () => {
+          record.sectionDisposed = true
+        }
+      },
+    }
+    const shadow = {
+      register() {
+        throw new Error('dsh-tui: tuiSettingsSections.register requires a live Cordis activation context')
+      },
+    }
+    ctx.get = (name, strict) => {
+      if (name !== 'tuiSettingsSections') return undefined
+      // The strict form returns the real runtime; the soft form returns the
+      // shadow placeholder the host refuses — the plugin must end up using
+      // the first and never give up on the second's error.
+      return strict === false ? shadow : working
+    }
+
+    assert.doesNotThrow(() => apply(ctx, undefined))
+    assert.equal(record.sections.length, 1)
+    ctx.__dispose()
+  })
 })
 
 test('the diagnostic peak override is opt-in and off by default', () => {

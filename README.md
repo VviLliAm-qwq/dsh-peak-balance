@@ -180,6 +180,17 @@ DSH_PEAK_BALANCE_FORCE_PEAK=1 dsh --profile dsh-tui   # PowerShell: $env:DSH_PEA
 The override changes presentation only — the countdown still describes the real
 clock — and it is off unless the variable is set to `1`/`true`/`yes`/`on`.
 
+### Diagnostics
+
+The plugin keeps a bounded lifecycle log at `~/.dsh-tui/dsh-peak-balance.log`:
+one line when the module is imported, one when `apply()` starts (with pid and
+the file path it was loaded from), the resolved config, which host seams were
+mountable, the outcome of every registration, and teardown. That is enough to
+tell "the host never loaded the file" apart from "a seam refused" without
+attaching a debugger to a running TUI. The file trims itself to its newest half
+once it passes 128 KiB, and `DSH_TUI_DEBUG=1` adds the per-refresh detail. Test
+runs never touch it.
+
 ## Listing
 
 This plugin is listed on the dsh-tui plugin market. Market listings are a link

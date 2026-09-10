@@ -4,6 +4,37 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.4] - 2026-09-10
+
+### Fixed
+
+- **The plugin registered nothing on a real dsh-tui boot.** Services were
+  resolved with the non-strict `ctx.get(name, false)`, which — in compositions
+  where the dsh-tui seam rows are shadowed — hands back a placeholder whose
+  method calls the host rejects with `requires a live Cordis activation
+  context`. The settings namespace still registered (the settings service does
+  not verify the caller), so the plugin looked half-alive: no settings card, no
+  status line. `seamServices()` now asks strictly first — the form the shipped
+  TUI plugins use — and keeps the non-strict accessor only as a fallback, so
+  both host shapes resolve. Reported by the 0.1.3 lifecycle log.
+
+### Added
+
+- Regression tests for the seam resolution order and for a refusing shadow
+  placeholder, so the bug cannot come back silently.
+
+## [0.1.3] - 2026-09-10
+
+### Added
+
+- A bounded lifecycle log at `~/.dsh-tui/dsh-peak-balance.log`: one line when
+  the module is imported, one when `apply()` starts (with pid and file path),
+  the resolved config, a probe of which host seams are mounted, the outcome of
+  every registration, and the teardown. Diagnosing a silently inert plugin
+  previously required guessing; the host's own diagnostics never reach a file.
+  The log trims itself to its newest half past 128 KiB and stays untouched
+  under `node --test`.
+
 ## [0.1.2] - 2026-09-10
 
 ### Added

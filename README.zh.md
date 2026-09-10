@@ -112,6 +112,10 @@ DSH_PEAK_BALANCE_FORCE_PEAK=1 dsh --profile dsh-tui   # PowerShell: $env:DSH_PEA
 
 该开关只改变呈现方式（倒计时仍按真实时钟显示），不设置该变量时完全不生效。
 
+### 诊断日志
+
+插件在 `~/.dsh-tui/dsh-peak-balance.log` 保留一份有上限的生命周期日志：模块被导入一行、`apply()` 开始一行（含 pid 与实际加载的文件路径）、解析出的配置、可挂载的宿主接缝探测结果、每次注册的结果，以及卸载。有了它就能区分「宿主压根没加载这个文件」和「某个接缝拒绝了注册」，不必给运行中的 TUI 挂调试器。文件超过 128 KiB 时自动裁剪保留最新一半；`DSH_TUI_DEBUG=1` 会追加每次刷新的细节。跑测试时不会写入该文件。
+
 ## 许可
 
 MIT — 见 [LICENSE](LICENSE)。
