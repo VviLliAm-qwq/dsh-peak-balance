@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.7] - 2026-09-10
+
+### Changed
+
+- Plain line: a blank row above it (so it never touches the transcript) and two
+  cells of indent, one past the prompt cursor's column. The warning frame keeps
+  the two-cell indent but no top gap — it already fills the host's three-row
+  budget, and a margin would push its bottom border into the clipped area.
+
 ## [0.1.6] - 2026-09-10
 
 ### Changed

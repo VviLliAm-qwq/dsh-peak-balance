@@ -7,6 +7,7 @@ import {
   VIEW_INDENT_CELLS,
   VIEW_KEY,
   VIEW_MAX_ROWS,
+  VIEW_TOP_GAP_ROWS,
   createStatusView,
   hexToRgb,
   pulseColor,
@@ -72,6 +73,7 @@ test('off-peak renders a single themed line with no frame', () => {
   assert.equal(tree.type, 'Box')
   assert.equal(tree.props.flexDirection, 'row')
   assert.equal(tree.props.paddingLeft, VIEW_INDENT_CELLS)
+  assert.equal(tree.props.marginTop, VIEW_TOP_GAP_ROWS)
   assert.equal(tree.children.length, 1)
   const line = tree.children[0]
   assert.equal(line.type, 'Text')
@@ -79,15 +81,21 @@ test('off-peak renders a single themed line with no frame', () => {
   assert.match(treeText(tree), /谷时/)
 })
 
-test('both shapes keep the same one-cell indent above the prompt', () => {
+test('both shapes use the same indent, and only the plain line takes the gap', () => {
   const offPeak = render(buildDisplay({ atMs: beijing(2026, 9, 10, 13, 0), lang: 'zh', config: CONFIG }))
   assert.equal(offPeak.tree.props.paddingLeft, VIEW_INDENT_CELLS)
+  assert.equal(offPeak.tree.props.marginTop, VIEW_TOP_GAP_ROWS)
+  // Two rows total (gap + line) stay inside the host's three-row clip.
+  assert.ok(VIEW_TOP_GAP_ROWS + 1 <= 3)
 
   const peak = render(buildDisplay({ atMs: beijing(2026, 9, 10, 10, 30), lang: 'zh', config: CONFIG }))
   // The warning frame shifts as a whole, so its border lands on the same
   // column as the plain line's first glyph.
   assert.equal(peak.tree.props.marginLeft, VIEW_INDENT_CELLS)
-  assert.equal(VIEW_INDENT_CELLS, 1)
+  // No top gap on the frame: it already fills the three-row budget, and a
+  // margin would push its bottom border into the clipped area.
+  assert.equal(peak.tree.props.marginTop, undefined)
+  assert.equal(VIEW_INDENT_CELLS, 2)
 })
 
 test('peak + warning renders a three-row pulsing frame', () => {
