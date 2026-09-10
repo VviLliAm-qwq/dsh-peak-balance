@@ -116,6 +116,13 @@ DSH_PEAK_BALANCE_FORCE_PEAK=1 dsh --profile dsh-tui   # PowerShell: $env:DSH_PEA
 
 插件在 `~/.dsh-tui/dsh-peak-balance.log` 保留一份有上限的生命周期日志：模块被导入一行、`apply()` 开始一行（含 pid 与实际加载的文件路径）、解析出的配置、可挂载的宿主接缝探测结果、每次注册的结果，以及卸载。有了它就能区分「宿主压根没加载这个文件」和「某个接缝拒绝了注册」，不必给运行中的 TUI 挂调试器。文件超过 128 KiB 时自动裁剪保留最新一半；`DSH_TUI_DEBUG=1` 会追加每次刷新的细节。跑测试时不会写入该文件。
 
+## 给插件作者的坑（本插件踩过的）
+
+- **Cordis 插件入口只能导出 `name`、`Config`、`apply` 三个符号。** 若在同一个模块里额外导出工具函数，宿主对 activation 的包装方式会改变，随后所有 `tuiStatus` / `tuiSettingsSections` 注册都会被拒（`requires a live Cordis activation context`）。这个故障是「半死」的：设置**命名空间**仍会注册成功，于是插件看起来活着，但设置卡片和状态行永远不出现。请把实现放在同目录的另一个模块，入口只做再导出。
+- **可选宿主服务要「严格优先」获取**（`ctx.get(name)`）；非严格的 `ctx.get(name, false)` 可能返回影子占位实例，宿主会拒绝其方法调用。非严格形式只作兜底，并且要持续重试 —— 第一拍时接缝行可能仍在激活中。
+
+本插件把排查过程写进 `~/.dsh-tui/dsh-peak-balance.log`，上面两条就是这样查出来的（见上文「诊断日志」）。
+
 ## 许可
 
 MIT — 见 [LICENSE](LICENSE)。

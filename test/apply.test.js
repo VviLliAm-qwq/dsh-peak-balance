@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { Config, SETTINGS_NS, apply, balanceStateOf, forcePeakFromEnv, sanitizeConfig, seamServices, settingsSection } from '../lib/index.js'
+import { Config, SETTINGS_NS, apply, balanceStateOf, forcePeakFromEnv, sanitizeConfig, seamServices, settingsSection } from '../lib/plugin.js'
 import { createFakeReact, treeText } from '../test-support/fake-react.js'
 
 /** A Cordis-context stand-in that records everything the plugin touches. */
@@ -322,7 +322,7 @@ test('a failing settings registration does not stop the other seams', () => {
   })
 })
 
-test('a refused status registration degrades instead of throwing', () => {
+test('a single refused status registration keeps retrying instead of giving up', () => {
   withoutApiKey(() => {
     const ctx = makeCtx()
     const services = makeServices(ctx.__record, {
@@ -336,10 +336,43 @@ test('a refused status registration degrades instead of throwing', () => {
     ctx.get = (name) => services[name]
 
     assert.doesNotThrow(() => apply(ctx, undefined))
+    // One refusal happens on the first tick, while the seam row is still
+    // activating; it must not be treated as final.
     assert.equal(ctx.__record.views.length, 1)
-    assert.ok(ctx.__record.logs.some(([, message]) => /refused/.test(message)))
+    assert.equal(ctx.__record.logs.some(([, message]) => /refused/.test(message)), false)
     ctx.__dispose()
   })
+})
+
+test('a status view that is refused every time eventually degrades with a warning', async () => {
+  const saved = process.env.DEEPSEEK_API_KEY
+  const savedLang = process.env.DSH_TUI_LANG
+  delete process.env.DEEPSEEK_API_KEY
+  process.env.DSH_TUI_LANG = 'zh'
+  try {
+    const ctx = makeCtx()
+    const services = makeServices(ctx.__record, {
+      tuiStatus: {
+        registerView(descriptor) {
+          ctx.__record.views.push(descriptor)
+          return undefined
+        },
+      },
+    })
+    ctx.get = (name) => services[name]
+
+    apply(ctx, undefined)
+    // Five retry ticks at 400 ms each.
+    await new Promise(resolve => setTimeout(resolve, 2400))
+    assert.ok(ctx.__record.views.length >= 5, `expected repeated attempts, saw ${ctx.__record.views.length}`)
+    assert.ok(ctx.__record.logs.some(([, message]) => /refused 5 times/.test(message)))
+    ctx.__dispose()
+  } finally {
+    if (saved === undefined) delete process.env.DEEPSEEK_API_KEY
+    else process.env.DEEPSEEK_API_KEY = saved
+    if (savedLang === undefined) delete process.env.DSH_TUI_LANG
+    else process.env.DSH_TUI_LANG = savedLang
+  }
 })
 
 test('session events drive the line: model, usage, settled turn', () => {

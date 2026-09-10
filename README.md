@@ -191,6 +191,25 @@ attaching a debugger to a running TUI. The file trims itself to its newest half
 once it passes 128 KiB, and `DSH_TUI_DEBUG=1` adds the per-refresh detail. Test
 runs never touch it.
 
+## Notes for plugin authors
+
+Two host behaviours cost real debugging time here, and both are easy to hit:
+
+- **A Cordis entry must export only `name`, `Config` and `apply`.** Exporting
+  helpers from the same module changes how the loader wraps the activation, and
+  every `tuiStatus` / `tuiSettingsSections` registration from that activation is
+  then rejected with `requires a live Cordis activation context`. The failure is
+  partial and quiet: the settings *namespace* still registers, so the plugin
+  looks half-alive while the settings card and the status line never appear.
+  Keep the implementation in a sibling module and re-export the three symbols.
+- **Resolve optional host services strictly first** (`ctx.get(name)`); the
+  non-strict `ctx.get(name, false)` can hand back a shadow placeholder whose
+  method calls the host refuses. Keep the non-strict form only as a fallback,
+  and keep retrying — the seam rows may still be activating on the first tick.
+
+This plugin writes what it learned to `~/.dsh-tui/dsh-peak-balance.log`, which
+is how both were found; see *Diagnostics* above.
+
 ## Listing
 
 This plugin is listed on the dsh-tui plugin market. Market listings are a link

@@ -4,6 +4,29 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.5] - 2026-09-10
+
+### Fixed
+
+- **The entry module must export exactly `name`, `Config` and `apply`.** With
+  its helpers (`seamServices`, `settingsSection`, …) also exported from
+  `lib/index.js`, the loader wrapped the activation differently and every
+  dsh-tui seam registration from that activation was rejected with
+  `requires a live Cordis activation context`: the settings namespace still
+  registered (that service does not verify the caller), so the plugin looked
+  half-alive — no settings card, no status line. `lib/index.js` is now a shell
+  that re-exports those three symbols from `lib/plugin.js`, the same shape the
+  shipped TUI plugins use.
+- A rich status view refused once (the first tick can land while the seam row is
+  still activating) is no longer treated as final: the view is retried and only
+  a run of refusals degrades it.
+
+### Added
+
+- `test/entry.test.js` pins the export shape and the manifest→shell wiring.
+- Regression tests for the seam-resolution order, a refusing shadow
+  placeholder, and the retry-then-give-up status behaviour.
+
 ## [0.1.4] - 2026-09-10
 
 ### Fixed

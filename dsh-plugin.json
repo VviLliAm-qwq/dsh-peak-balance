@@ -3,7 +3,7 @@
   "manifestVersion": "0.15",
   "id": "com.dsh-tui-ecosystem.dsh-peak-balance",
   "name": "dsh-peak-balance",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "facets": {
     "host": {
       "entry": "lib/index.js",
