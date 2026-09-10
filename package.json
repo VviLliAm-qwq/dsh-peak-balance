@@ -1,0 +1,61 @@
+{
+  "name": "dsh-peak-balance",
+  "version": "0.1.0",
+  "description": "Peak/off-peak billing clock with live DeepSeek account balance and per-turn cost for dsh-tui: a status line above the prompt, an optional flashing peak-hour warning frame, and a settings card with four switches (balance, per-turn cost, warning mode, warning color)",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VviLliAm-qwq/dsh-peak-balance.git"
+  },
+  "author": "VviLliAm-qwq",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-tui",
+    "deepseek-harness",
+    "deepseek",
+    "balance",
+    "pricing",
+    "peak",
+    "off-peak",
+    "cost"
+  ],
+  "files": [
+    "lib",
+    "dsh-plugin.json",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": "^22.19 || >=24"
+  },
+  "scripts": {
+    "check:encoding": "node scripts/check-encoding.mjs",
+    "validate:manifest": "node scripts/validate-manifest.mjs",
+    "test": "node --test",
+    "pack:verify": "node scripts/pack-verify.mjs",
+    "verify": "npm run check:encoding && npm run validate:manifest && npm run test && npm run pack:verify"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  }
+}

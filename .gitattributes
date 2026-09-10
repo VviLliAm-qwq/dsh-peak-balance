@@ -1,0 +1,6 @@
+# Normalize line endings: the package ships JavaScript, JSON and YAML that
+# other tools parse, so the repository keeps LF everywhere.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.wav binary

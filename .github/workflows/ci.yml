@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines: ^22.19 || >=24
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      # Encoding first: a UTF-8 BOM in package.json / dsh-plugin.json /
+      # cordis.patch.yml is the documented way to brick a dsh profile.
+      - run: pnpm check:encoding
+      - run: pnpm validate:manifest
+      - run: pnpm test
+      # lib/ ships as authored (no build step), so the layout check needs no
+      # earlier build — it proves every module the entry imports is published.
+      - run: pnpm pack:verify

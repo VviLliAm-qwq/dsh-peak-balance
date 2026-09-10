@@ -1,0 +1,10 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+#
+# dsh-peak-balance: peak/off-peak clock + live balance + per-turn cost for
+# dsh-tui. The row carries no config — every knob lives in the plugin's own
+# settings namespace (`dsh-peak-balance`), editable on the TUI settings screen.
+- insert:
+    - id: dsh-peak-balance
+      name: 'dsh-peak-balance'
