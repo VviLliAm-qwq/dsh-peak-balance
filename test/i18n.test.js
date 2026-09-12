@@ -37,8 +37,18 @@ test('resolveLang follows the env pin, then the file, then the locale', () => {
     resolveLang({ env: {}, readFile: () => { throw new Error('ENOENT') }, locale: 'zh-CN' }),
     'zh',
   )
+  // With no `locale` argument the plugin asks the host, and the host's answer is
+  // machine-dependent — a Chinese desktop and an English CI runner disagree —
+  // so the probe is pinned here. Asserting on the runner's own locale is what
+  // made this test pass locally and fail on every CI job.
+  const missing = () => { throw new Error('ENOENT') }
+  assert.equal(resolveLang({ env: {}, readFile: missing, detectLocale: () => 'en-US' }), 'en')
+  assert.equal(resolveLang({ env: {}, readFile: missing, detectLocale: () => 'zh-CN' }), 'zh')
   // No signal at all keeps the historical default.
-  assert.equal(resolveLang({ env: {}, readFile: () => { throw new Error('ENOENT') }, locale: undefined }), 'zh')
+  assert.equal(resolveLang({ env: {}, readFile: missing, detectLocale: () => undefined }), 'zh')
+  // A host probe that throws (no Intl data, sandboxed runtime) is the same as
+  // "no signal", never an error.
+  assert.equal(resolveLang({ env: {}, readFile: missing, detectLocale: () => { throw new Error('no Intl') } }), 'zh')
   assert.equal(resolveLang({ env: { DSH_TUI_LANG: 'nonsense' }, readFile: () => { throw new Error('x') }, locale: 'de' }), 'en')
 })
 
