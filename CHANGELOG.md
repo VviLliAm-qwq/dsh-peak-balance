@@ -4,6 +4,80 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.11] - 2026-09-12
+
+### Fixed
+
+- **Leaving a conversation and coming back lost its figure.** A settled turn is
+  a fact about the CONVERSATION, but it lived only inside the tracker of the
+  session object that reported it — and switching away through `/resume`
+  disposes that session. Coming back reuses the conversation id with a fresh
+  agent, and the host replays the conversation privately (no `session/event`),
+  so nothing rebuilt the tracker and the line showed `—`. Settled turns are now
+  also remembered by conversation id (bounded, newest 24), which is what the
+  line falls back to for a known focus with no live tracker. An unknown or
+  cleared focus still never resurrects a conversation, so `/new` keeps showing
+  `—`.
+
+## [0.1.10] - 2026-09-12
+
+### Fixed
+
+- **`/new` kept the previous conversation's per-turn figure.** The host starts a
+  fresh conversation by EMPTYING its focus marker, which 0.1.9 read as "no
+  information" and answered with the last-event fallback — i.e. it put back the
+  very conversation the user had just left. An emptied marker is now read as the
+  statement it is (`{ state: 'cleared' }`, not `{ state: 'absent' }`): the line
+  gives up the figure, and the first conversation that is not the one left
+  behind claims it, so a parked conversation finishing a background turn cannot
+  take the line back. A marker that cannot be read at all still falls back to the
+  last session event, which is what a host that never writes one needs.
+
+### Added
+
+- Regression tests covering a `/new` the fallback poll notices both before and
+  after the fresh conversation's first turn lands.
+
+## [0.1.9] - 2026-09-12
+
+### Fixed
+
+- **The per-turn cost belonged to the wrong conversation after a switch.** The
+  line followed "the session that appended last", but switching conversations
+  publishes no `session/event`: the host replays the target session straight
+  into its own projector, and DSH only fires that event for appends the current
+  process makes ("constructor seeds do not emit"). Switching therefore left the
+  *previous* conversation's figure on screen, and a parked conversation
+  settling a background turn stole it back. The line now follows the
+  conversation the host reports as focused.
+- **Disposing the shown conversation fell back to the stalest tracker.** The
+  tracker map keeps recency order (newest last) and the fallback read its first
+  key — the *least* recently active conversation. It now moves to the newest
+  survivor.
+- **A reused session id could leak turn state between agents.** Trackers were
+  keyed by session id, and dsh-tui reuses ids ("A → /new → /resume A lands back
+  on the same id with a fresh agent"): an abandoned mid-turn got priced into the
+  replacement agent's first settled turn, and disposing the parked agent deleted
+  the live one's data. Trackers are now keyed by the session object.
+
+### Added
+
+- Focus tracking from two independent sources: the host-mediated
+  `tui/session-switched` DecisionEvents notification (exact, used when the host
+  mounts its plugin-interop row) and the launcher marker the host rewrites on
+  every switch, polled once a second as the fallback. A conversation with no
+  settled turn in this process now shows `—` instead of another conversation's
+  amount.
+- The manifest requires `tui.dsh/v1alpha1#DecisionEvents` as an **optional**
+  contract with the fallback spelled out, so a host without the capability
+  degrades (`compatible_degraded`) instead of refusing admission. Admission was
+  verified against the host's own parser/validator/negotiator.
+- `DSH_PEAK_BALANCE_FOCUS_FILE` overrides the marker path for tests and
+  diagnostics, and the seam probe line now reports `host=<n>`.
+- Regression tests for the switch, the marker fallback, a refusing host, the
+  disposal fallback order and the reused-id case. `test-support/harness.js`
+  carries the shared fake context for the wiring tests.
+
 ## [0.1.8] - 2026-09-10
 
 ### Fixed

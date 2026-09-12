@@ -22,7 +22,7 @@ that pulses in one of seven colors:
 | --- | --- |
 | Peak / off-peak clock | The billing window currently in force and a live countdown to the next price switch (`09:00-12:00` / `14:00-18:00` Beijing time, Monday–Friday; weekends are off-peak all day). |
 | Live balance | Your DeepSeek account balance, refreshed after **every completed turn** and once a minute in the background. |
-| Per-turn cost | What the turn that just finished cost, in CNY, priced from the official rate card — peak and off-peak usage are priced separately, by each request's own timestamp. |
+| Per-turn cost | What the turn that just finished cost, in CNY, priced from the official rate card — peak and off-peak usage are priced separately, by each request's own timestamp. The figure follows the conversation you are **focused on**, not the one that last appended an event. |
 | Peak-hour warning | Optional. While peak pricing is active the status contribution becomes a rounded frame whose border, phase label and travelling waveform pulse in the chosen color. |
 | Settings card | A new **Peak & Balance** card on the `/settings` screen, with its four switches rendered directly on the card — no subpage to open. |
 
@@ -150,8 +150,13 @@ activation's effect disposer.
   detected and simply show no balance.
 - Rich status contributions share a six-row budget with other plugins; this one
   requests three rows, and only while the warning frame is visible.
-- Only the most recently active session is displayed; subagent sessions are
-  ignored on purpose, so a delegated child never rewrites your turn cost.
+- The line follows the conversation the host reports as **focused**: switching
+  conversations moves it with you. A settled turn is remembered per
+  CONVERSATION, so leaving one and coming back still shows that conversation's
+  own last turn; `—` appears only when the focused conversation has no settled
+  turn in this process yet (a conversation just started with `/new`), never
+  another conversation's figure. Subagent sessions are ignored on purpose, so a
+  delegated child never rewrites your turn cost.
 
 ## Publishing and versioning
 
@@ -198,6 +203,22 @@ tell "the host never loaded the file" apart from "a seam refused" without
 attaching a debugger to a running TUI. The file trims itself to its newest half
 once it passes 128 KiB, and `DSH_TUI_DEBUG=1` adds the per-refresh detail. Test
 runs never touch it.
+
+The focused conversation comes from two independent sources, in this order:
+
+1. the host-mediated `tui/session-switched` DecisionEvents notification, used
+   when the host mounts its plugin-interop row (`host=1` in the log). The
+   manifest requires that contract as **optional** with its fallback spelled
+   out, so a host without it degrades instead of refusing admission;
+2. the launcher marker the host rewrites on every switch
+   (`~/.dsh-tui/resume.txt`), polled once a second. The host EMPTIES that marker
+   to start a fresh conversation (`/new`) — a statement rather than silence: the
+   line gives up the figure you were reading, and the first conversation that is
+   not the one left behind claims it. Only a marker that cannot be read at all
+   falls back to the most recent session event.
+
+`DSH_PEAK_BALANCE_FOCUS_FILE` overrides the marker path — meant for tests and
+diagnostics, so a test run never reads a real marker.
 
 ## Notes for plugin authors
 

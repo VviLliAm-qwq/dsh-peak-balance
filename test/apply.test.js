@@ -3,121 +3,9 @@ import assert from 'node:assert/strict'
 
 import { Config, SETTINGS_NS, apply, balanceStateOf, forcePeakFromEnv, sanitizeConfig, seamServices, settingsSection } from '../lib/plugin.js'
 import { createFakeReact, treeText } from '../test-support/fake-react.js'
-
-/** A Cordis-context stand-in that records everything the plugin touches. */
-function makeCtx(options = {}) {
-  const services = options.services ?? {}
-  const record = {
-    settings: [],
-    sections: [],
-    views: [],
-    listeners: new Map(),
-    cleanups: [],
-    logs: [],
-  }
-  const ctx = {
-    logger: {
-      info: message => record.logs.push(['info', message]),
-      warn: message => record.logs.push(['warn', message]),
-      debug: () => {},
-    },
-    get(name) {
-      if (options.getThrows === true) throw new Error('get exploded')
-      return services[name]
-    },
-    on(event, handler) {
-      const list = record.listeners.get(event) ?? []
-      list.push(handler)
-      record.listeners.set(event, list)
-      return ctx
-    },
-    effect(callback) {
-      const result = callback()
-      if (result !== null && typeof result === 'object' && typeof result.next === 'function') {
-        const step = result.next()
-        const disposer = step.value
-        record.cleanups.push(() => {
-          if (typeof disposer === 'function') disposer()
-          result.next()
-        })
-      } else if (typeof result === 'function') {
-        record.cleanups.push(result)
-      }
-      return ctx
-    },
-  }
-  ctx.__record = record
-  ctx.__emit = (event, ...args) => {
-    for (const handler of record.listeners.get(event) ?? []) handler(...args)
-  }
-  ctx.__dispose = () => {
-    for (const cleanup of record.cleanups) cleanup()
-  }
-  return ctx
-}
-
-/** The three host seams, each recording its registrations. */
-function makeServices(record, overrides = {}) {
-  return {
-    settings: {
-      register(ns, schema) {
-        record.settings.push({ ns, schema })
-        return {
-          get: () => ({}),
-          watch: () => () => {},
-        }
-      },
-      ...overrides.settings,
-    },
-    tuiSettingsSections: {
-      register(section) {
-        record.sections.push(section)
-        return () => {
-          record.sectionDisposed = true
-        }
-      },
-      ...overrides.tuiSettingsSections,
-    },
-    tuiStatus: {
-      registerView(descriptor) {
-        record.views.push(descriptor)
-        return () => {
-          record.viewDisposed = true
-        }
-      },
-      ...overrides.tuiStatus,
-    },
-  }
-}
+import { ABSENT_FOCUS_FILE, makeCtx, makeServices, withoutSecrets } from '../test-support/harness.js'
 
 const FAKE_SESSION = { id: 'session-1', header: { id: 'session-1' } }
-
-/** Run `body` with an explicit environment (restored afterwards). */
-function withEnv(overrides, body) {
-  const saved = new Map()
-  for (const [key, value] of Object.entries(overrides)) {
-    saved.set(key, process.env[key])
-    if (value === undefined) delete process.env[key]
-    else process.env[key] = value
-  }
-  try {
-    body()
-  } finally {
-    for (const [key, value] of saved) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
-  }
-}
-
-/**
- * Keep balance lookups off the network regardless of the developer's env, and
- * pin the UI language: `resolveLang()` follows `DSH_TUI_LANG` first, so the
- * assertions below hold on an English CI runner too.
- */
-function withoutApiKey(body) {
-  withEnv({ DEEPSEEK_API_KEY: undefined, DSH_TUI_LANG: 'zh' }, body)
-}
 
 test('sanitizeConfig accepts only known keys and types', () => {
   assert.deepEqual(sanitizeConfig(undefined), {
@@ -159,7 +47,7 @@ test('seamServices prefers the strict accessor and falls back to the soft one', 
 })
 
 test('a shadow placeholder that refuses cannot stop the registration', () => {
-  withoutApiKey(() => {
+  withoutSecrets(() => {
     const ctx = makeCtx()
     const record = ctx.__record
     const working = {
@@ -242,7 +130,7 @@ test('the settings card declares exactly the four switches', () => {
 })
 
 test('a host without any seam stays inert and never throws', () => {
-  withoutApiKey(() => {
+  withoutSecrets(() => {
     const ctx = makeCtx()
     assert.doesNotThrow(() => apply(ctx, undefined))
     assert.equal(ctx.__record.settings.length, 0)
@@ -253,7 +141,7 @@ test('a host without any seam stays inert and never throws', () => {
 })
 
 test('a throwing service accessor is contained', () => {
-  withoutApiKey(() => {
+  withoutSecrets(() => {
     const ctx = makeCtx({ getThrows: true })
     assert.doesNotThrow(() => apply(ctx, {}))
     assert.ok(ctx.__record.logs.some(([level]) => level === 'warn'))
@@ -262,7 +150,7 @@ test('a throwing service accessor is contained', () => {
 })
 
 test('garbage configuration cannot break the wiring', () => {
-  withoutApiKey(() => {
+  withoutSecrets(() => {
     const ctx = makeCtx()
     const services = makeServices(ctx.__record)
     ctx.get = (name) => services[name]
@@ -273,7 +161,7 @@ test('garbage configuration cannot break the wiring', () => {
 })
 
 test('every seam is registered once, with the documented shape', () => {
-  withoutApiKey(() => {
+  withoutSecrets(() => {
     const ctx = makeCtx()
     const services = makeServices(ctx.__record)
     ctx.get = (name) => services[name]
@@ -303,7 +191,7 @@ test('every seam is registered once, with the documented shape', () => {
 })
 
 test('a failing settings registration does not stop the other seams', () => {
-  withoutApiKey(() => {
+  withoutSecrets(() => {
     const ctx = makeCtx()
     const services = makeServices(ctx.__record, {
       settings: {
@@ -323,7 +211,7 @@ test('a failing settings registration does not stop the other seams', () => {
 })
 
 test('a single refused status registration keeps retrying instead of giving up', () => {
-  withoutApiKey(() => {
+  withoutSecrets(() => {
     const ctx = makeCtx()
     const services = makeServices(ctx.__record, {
       tuiStatus: {
@@ -347,8 +235,10 @@ test('a single refused status registration keeps retrying instead of giving up',
 test('a status view that is refused every time eventually degrades with a warning', async () => {
   const saved = process.env.DEEPSEEK_API_KEY
   const savedLang = process.env.DSH_TUI_LANG
+  const savedFocus = process.env.DSH_PEAK_BALANCE_FOCUS_FILE
   delete process.env.DEEPSEEK_API_KEY
   process.env.DSH_TUI_LANG = 'zh'
+  process.env.DSH_PEAK_BALANCE_FOCUS_FILE = ABSENT_FOCUS_FILE
   try {
     const ctx = makeCtx()
     const services = makeServices(ctx.__record, {
@@ -372,11 +262,13 @@ test('a status view that is refused every time eventually degrades with a warnin
     else process.env.DEEPSEEK_API_KEY = saved
     if (savedLang === undefined) delete process.env.DSH_TUI_LANG
     else process.env.DSH_TUI_LANG = savedLang
+    if (savedFocus === undefined) delete process.env.DSH_PEAK_BALANCE_FOCUS_FILE
+    else process.env.DSH_PEAK_BALANCE_FOCUS_FILE = savedFocus
   }
 })
 
 test('session events drive the line: model, usage, settled turn', () => {
-  withoutApiKey(() => {
+  withoutSecrets(() => {
     const ctx = makeCtx()
     const services = makeServices(ctx.__record)
     ctx.get = (name) => services[name]
@@ -410,7 +302,7 @@ test('session events drive the line: model, usage, settled turn', () => {
 })
 
 test('subagent sessions never touch the displayed turn', () => {
-  withoutApiKey(() => {
+  withoutSecrets(() => {
     const ctx = makeCtx()
     const services = makeServices(ctx.__record)
     ctx.get = (name) => services[name]
@@ -433,7 +325,7 @@ test('subagent sessions never touch the displayed turn', () => {
 })
 
 test('malformed session events are ignored without throwing', () => {
-  withoutApiKey(() => {
+  withoutSecrets(() => {
     const ctx = makeCtx()
     const services = makeServices(ctx.__record)
     ctx.get = (name) => services[name]
@@ -452,7 +344,7 @@ test('malformed session events are ignored without throwing', () => {
 })
 
 test('repeated activation is deterministic (no duplicate registrations in one fiber)', () => {
-  withoutApiKey(() => {
+  withoutSecrets(() => {
     const ctx = makeCtx()
     const services = makeServices(ctx.__record)
     ctx.get = (name) => services[name]

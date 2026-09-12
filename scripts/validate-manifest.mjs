@@ -61,13 +61,38 @@ if (typeof host?.entry === 'string' && !existsSync(join(root, host.entry))) {
   fail(`facets.host.entry does not exist: ${host.entry}`)
 }
 
-// C. Requirements — this plugin contributes no commands and consumes no
-// contract coordinates (its seams are host UI services, soft-probed).
+// C. Requirements — the plugin consumes exactly one contract coordinate, and
+// it must stay OPTIONAL: the session-switch notification behind it makes the
+// status line follow the focused conversation, while every host without the
+// capability covers the same feature from the focused-session marker. A
+// required declaration would make such a host REFUSE ADMISSION outright
+// (negotiate -> rejected), taking the whole plugin down; an optional contract
+// without a fallback is refused by admission too. `subscriptions` must stay
+// empty: the registry carries no `event` entry for this capability, so a
+// subscription row referencing it fails admission ("subscription must
+// reference an event").
 if (!Array.isArray(manifest.requires?.contracts)) fail('requires.contracts must be an array')
 if (manifest.requires?.services) fail('requires.services must not be declared (v0.15)')
 if (manifest.provides) fail('provides must not be declared (v0.15)')
 if (!Array.isArray(manifest.permissions)) fail('permissions must be an array')
 if (!Array.isArray(manifest.subscriptions)) fail('subscriptions must be an array')
+if ((manifest.subscriptions ?? []).length > 0) {
+  fail('subscriptions must stay empty — no registry event backs the session-switch capability')
+}
+const contracts = manifest.requires?.contracts ?? []
+for (const contract of contracts) {
+  const coordinate = `${contract?.apiVersion}#${contract?.kind}`
+  if (coordinate !== 'tui.dsh/v1alpha1#DecisionEvents') {
+    fail(`unexpected required contract: ${coordinate}`)
+    continue
+  }
+  if (contract.optional !== true) {
+    fail('the DecisionEvents contract must be optional, or a host without it refuses admission')
+  }
+  if (typeof contract.fallback !== 'string' || contract.fallback === '') {
+    fail('an optional contract must declare the fallback that covers it')
+  }
+}
 if (!Array.isArray(manifest.contributes?.commands)) fail('contributes.commands must be an array')
 if ((manifest.contributes?.commands ?? []).length > 0) {
   fail('this plugin declares no commands; contributes.commands must stay empty')

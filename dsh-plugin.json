@@ -3,7 +3,7 @@
   "manifestVersion": "0.15",
   "id": "com.dsh-tui-ecosystem.dsh-peak-balance",
   "name": "dsh-peak-balance",
-  "version": "0.1.8",
+  "version": "0.1.11",
   "facets": {
     "host": {
       "entry": "lib/index.js",
@@ -11,7 +11,14 @@
     }
   },
   "requires": {
-    "contracts": []
+    "contracts": [
+      {
+        "apiVersion": "tui.dsh/v1alpha1",
+        "kind": "DecisionEvents",
+        "optional": true,
+        "fallback": "Without the mediated session-switch notification the status line follows the host's focused-session marker (~/.dsh-tui/resume.txt), polled once a second; without a marker it keeps the most recent session event."
+      }
+    ]
   },
   "permissions": [],
   "subscriptions": [],
