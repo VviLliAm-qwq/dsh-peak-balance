@@ -6,6 +6,8 @@ import { join } from 'node:path'
 
 import { Config, SETTINGS_NS, apply, balanceStateOf, forcePeakFromEnv, sanitizeConfig, seamServices, settingsSection } from '../lib/plugin.js'
 import { SCENE_ID } from '../lib/history-command.js'
+import { CACHE_VERSION } from '../lib/history-scan.js'
+import { foldSessionEvents } from '../lib/history.js'
 import { createFakeReact, treeText } from '../test-support/fake-react.js'
 import { ABSENT_DSH_HOME, ABSENT_FOCUS_FILE, ABSENT_LANG_FILE, ABSENT_STATE_DIR, makeCtx, makeServices, renderLine, withEnv, withoutSecrets } from '../test-support/harness.js'
 
@@ -139,6 +141,14 @@ test('balanceStateOf maps every documented failure to a display state', () => {
   assert.deepEqual(balanceStateOf({ ok: true, balances: [{ currency: 'CNY', total: 3 }] }), {
     state: 'ok',
     amount: 3,
+    currency: 'CNY',
+  })
+  // A non-CNY account keeps its own currency, so the view cannot print ¥ over
+  // a dollar figure (`cnyBalance` falls back to the first reported entry).
+  assert.deepEqual(balanceStateOf({ ok: true, balances: [{ currency: 'USD', total: 5 }] }), {
+    state: 'ok',
+    amount: 5,
+    currency: 'USD',
   })
   assert.deepEqual(balanceStateOf({ ok: true, balances: [] }), { state: 'error' })
   assert.deepEqual(balanceStateOf({ ok: false, reason: 'no-key' }), { state: 'no-key' })
@@ -474,6 +484,62 @@ test('/th opens the scene, and /th price manages custom rates', async () => {
   }
 })
 
+test('the history grid is painted from the cache before any scan runs', async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'dsh-pb-preload-'))
+  try {
+    // A cache left by an earlier session, holding one model the price card
+    // cannot rate. `/th price` answers from the published view, so it can only
+    // name that model when activation already painted the grid — the point of
+    // the preload is that opening `/hist` never waits on the scan.
+    const day = Date.UTC(2026, 8, 7, 4, 0, 0)
+    const record = foldSessionEvents([
+      { type: 'session', id: 's1', createdAt: day },
+      { type: 'request/header', seq: 0, time: day, data: { header: { config: { model: 'mystery-model-9000' } } } },
+      { type: 'assistant/message', seq: 1, time: day, data: { usage: { inputTokens: 100, outputTokens: 10 } } },
+    ])
+    writeFileSync(
+      join(stateDir, 'dsh-peak-balance-history.json'),
+      JSON.stringify({
+        version: CACHE_VERSION,
+        builtAt: day,
+        files: { '--w--/s1/session.jsonl.zstd': { size: 1, mtimeMs: 1, record } },
+      }),
+    )
+
+    await withEnv(
+      {
+        DEEPSEEK_API_KEY: undefined,
+        DSH_TUI_LANG: 'zh',
+        DSH_PEAK_BALANCE_FOCUS_FILE: ABSENT_FOCUS_FILE,
+        DSH_TUI_STATE_DIR: stateDir,
+        DSH_HOME: ABSENT_DSH_HOME,
+      },
+      async () => {
+        const ctx = makeCtx()
+        const services = makeServices(ctx.__record)
+        ctx.get = (name) => services[name]
+        apply(ctx, undefined)
+
+        const th = ctx.__record.commands.find(command => command.name === 'th')
+        const listing = await th.handler({ rawInput: ' price ' })
+        assert.equal(listing.kind, 'success')
+        assert.match(listing.text, /mystery-model-9000/)
+
+        // Activation itself did the preload — that is what this pins. The
+        // sessions root is empty here, so anything reading the grid after a
+        // completed scan would find nothing at all.
+        assert.equal(ctx.__record.logs.some(([, message]) => /history preloaded records=1/.test(message)), true)
+        ctx.__dispose()
+      },
+    )
+  } finally {
+    // A `/th` handler can kick off a background scan; let it settle so its cache
+    // write cannot land after the cleanup.
+    await new Promise(resolve => setTimeout(resolve, 100))
+    rmSync(stateDir, { recursive: true, force: true })
+  }
+})
+
 test('a failing settings registration does not stop the other seams', () => {
   withoutSecrets(() => {
     const ctx = makeCtx()
@@ -585,7 +651,7 @@ test('session events drive the line: model, usage, settled turn', () => {
   })
 })
 
-test('subagent sessions never touch the displayed turn', () => {
+test('a subagent with no known parent never touches the displayed turn', () => {
   withoutSecrets(() => {
     const ctx = makeCtx()
     const services = makeServices(ctx.__record)
@@ -604,6 +670,124 @@ test('subagent sessions never touch the displayed turn', () => {
     const tree = ctx.__record.views[0].component({ React: harness.React, ui: { Box: 'Box', Text: 'Text' } })
     assert.match(treeText(tree), /本轮 —/)
     harness.cleanup()
+    ctx.__dispose()
+  })
+})
+
+test("a subagent's spend is folded into its parent's running turn", () => {
+  withoutSecrets(() => {
+    const ctx = makeCtx()
+    const services = makeServices(ctx.__record)
+    ctx.get = (name) => services[name]
+    apply(ctx, undefined)
+
+    const parent = { id: 'parent', header: { id: 'parent' } }
+    const child = {
+      id: 'child',
+      header: { id: 'child', origin: 'subagent', delegationDepth: 1, parentSession: 'parent' },
+    }
+    const at = Date.now()
+
+    ctx.__emit('session/event', parent, { type: 'turn/start', time: at, data: { turn: 1 } })
+    ctx.__emit('session/event', parent, {
+      type: 'request/header',
+      time: at,
+      data: { header: { config: { model: 'deepseek-flash' } } },
+    })
+    ctx.__emit('session/event', parent, {
+      type: 'assistant/message',
+      time: at,
+      data: { usage: { inputTokens: 500_000, outputTokens: 0 } },
+    })
+    // The delegated child burns 1M cache-miss tokens on the parent's behalf.
+    ctx.__emit('session/event', child, {
+      type: 'assistant/message',
+      time: at,
+      data: { usage: { inputTokens: 1_000_000, outputTokens: 0 } },
+    })
+
+    // Live, before the parent settles: 1.5M miss tokens — ¥1.50 off-peak.
+    assert.match(renderLine(ctx), /本轮·计费中 ¥(1\.50|3\.00)/)
+
+    ctx.__emit('session/event', parent, { type: 'turn/end', time: at, data: { turn: 1 } })
+    const settled = renderLine(ctx)
+    assert.match(settled, /本轮 ¥(1\.50|3\.00)/)
+
+    // A background child finishing after the round closed cannot reopen it.
+    ctx.__emit('session/event', child, {
+      type: 'assistant/message',
+      time: at,
+      data: { usage: { inputTokens: 9_000_000, outputTokens: 0 } },
+    })
+    assert.equal(renderLine(ctx), settled)
+
+    ctx.__dispose()
+  })
+})
+
+test('a report is filed under the tier its request STARTED in', () => {
+  withoutSecrets(() => {
+    const ctx = makeCtx()
+    const services = makeServices(ctx.__record)
+    ctx.get = (name) => services[name]
+    apply(ctx, undefined)
+
+    const peakAt = Date.UTC(2026, 8, 10, 2, 0) // 2026-09-10 10:00 Beijing: peak
+    const idleAt = Date.UTC(2026, 8, 10, 5, 0) // 2026-09-10 13:00 Beijing: off-peak
+
+    ctx.__emit('session/event', FAKE_SESSION, { type: 'turn/start', time: peakAt, data: { turn: 1 } })
+    ctx.__emit('session/event', FAKE_SESSION, {
+      type: 'request/header',
+      time: peakAt,
+      data: { header: { config: { model: 'deepseek-flash' } } },
+    })
+    // The 10:00 request's answer only lands at 13:00 — it ran, and is billed, peak.
+    ctx.__emit('session/event', FAKE_SESSION, { type: 'step/start', time: peakAt, data: { turn: 1, step: 1 } })
+    ctx.__emit('session/event', FAKE_SESSION, {
+      type: 'assistant/message',
+      time: idleAt,
+      data: { turn: 1, step: 1, usage: { inputTokens: 1_000_000, outputTokens: 0 } },
+    })
+    // An off-peak request, answered immediately.
+    ctx.__emit('session/event', FAKE_SESSION, { type: 'step/start', time: idleAt, data: { turn: 1, step: 2 } })
+    ctx.__emit('session/event', FAKE_SESSION, {
+      type: 'assistant/message',
+      time: idleAt,
+      data: { turn: 1, step: 2, usage: { inputTokens: 1_000_000, outputTokens: 0 } },
+    })
+    ctx.__emit('session/event', FAKE_SESSION, { type: 'turn/end', time: idleAt, data: { turn: 1 } })
+
+    // 1M peak miss (¥2) + 1M off-peak miss (¥1) = ¥3.00, whatever the wall clock.
+    assert.match(renderLine(ctx), /本轮 ¥3\.00/)
+    ctx.__dispose()
+  })
+})
+
+test('a round that reported nothing clears the settled figure', () => {
+  withoutSecrets(() => {
+    const ctx = makeCtx()
+    const services = makeServices(ctx.__record)
+    ctx.get = (name) => services[name]
+    apply(ctx, undefined)
+
+    ctx.__emit('session/event', FAKE_SESSION, {
+      type: 'request/header',
+      data: { header: { config: { model: 'deepseek-flash' } } },
+    })
+    ctx.__emit('session/event', FAKE_SESSION, {
+      type: 'assistant/message',
+      time: Date.now(),
+      data: { usage: { inputTokens: 1_000_000, outputTokens: 0 } },
+    })
+    ctx.__emit('session/event', FAKE_SESSION, { type: 'turn/end', time: Date.now(), data: { turn: 1 } })
+    assert.match(renderLine(ctx), /本轮 ¥[12]\.00/)
+
+    // The next round is interrupted before producing an answer: there is no
+    // honest figure for it, and the previous round's must not stand in.
+    ctx.__emit('session/event', FAKE_SESSION, { type: 'turn/start', time: Date.now(), data: { turn: 2 } })
+    ctx.__emit('session/event', FAKE_SESSION, { type: 'turn/end', time: Date.now(), data: { turn: 2 } })
+    assert.match(renderLine(ctx), /本轮 —/)
+
     ctx.__dispose()
   })
 })

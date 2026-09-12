@@ -52,6 +52,59 @@ test('a turn with no token report is not recorded', () => {
   assert.equal(tracker.lastTurn(), undefined)
 })
 
+test('a later empty turn clears the figure instead of leaving the old one', () => {
+  const tracker = createTracker()
+  tracker.setModel('deepseek-flash')
+  tracker.onUsage({ inputTokens: 1_000_000 }, beijing(2026, 9, 10, 13, 0))
+  assert.equal(tracker.endTurn(beijing(2026, 9, 10, 13, 1)).cost.total, 1)
+
+  // The next round was interrupted before it produced anything. Leaving the
+  // settled figure in place put the PREVIOUS round's cost on a line labelled
+  // "this turn"; about 2.5% of real turns end with no report at all.
+  assert.equal(tracker.endTurn(beijing(2026, 9, 10, 13, 2)), undefined)
+  assert.equal(tracker.lastTurn(), undefined)
+})
+
+test('a new turn drops whatever an abandoned turn left in the bucket', () => {
+  const tracker = createTracker()
+  tracker.setModel('deepseek-flash')
+  // A round that never emitted `turn/end` (aborted): its tokens must not be
+  // settled into the next round.
+  tracker.onUsage({ inputTokens: 1_000_000 }, beijing(2026, 9, 10, 13, 0))
+  tracker.beginTurn()
+  assert.equal(tracker.turnTokens(), 0)
+  assert.equal(tracker.endTurn(beijing(2026, 9, 10, 13, 5)), undefined)
+})
+
+test('the running turn is priced with its own model, not a later header', () => {
+  const tracker = createTracker()
+  tracker.setModel('deepseek-flash')
+  tracker.onUsage({ inputTokens: 1_000_000 }, beijing(2026, 9, 10, 13, 0))
+  // A `/model` switch mid-turn rewrites the header; the turn still ran on flash.
+  tracker.setModel('mystery-model')
+  const settled = tracker.endTurn(beijing(2026, 9, 10, 13, 1))
+  assert.equal(settled.model, 'deepseek-flash')
+  assert.equal(settled.cost.total, 1)
+})
+
+test('the running-turn token count includes cache reads', () => {
+  const tracker = createTracker()
+  tracker.onUsage(
+    { inputTokens: 1_000, outputTokens: 2_000, cacheReadTokens: 30_000_000 },
+    beijing(2026, 9, 10, 13, 0),
+  )
+  assert.equal(tracker.turnTokens(), 30_003_000)
+})
+
+test('reset clears the running turn model and instant too', () => {
+  const tracker = createTracker()
+  tracker.setModel('deepseek-flash')
+  tracker.onUsage({ inputTokens: 10 }, beijing(2026, 9, 10, 13, 0))
+  tracker.reset()
+  assert.equal(tracker.snapshot().turnModel, '')
+  assert.equal(tracker.snapshot().turnAt, undefined)
+})
+
 test('an unrated model keeps token counts but drops the money figure', () => {
   const tracker = createTracker()
   tracker.setModel('some-other-model')

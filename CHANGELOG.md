@@ -4,6 +4,86 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.3.3] - 2026-09-12
+
+### Performance
+
+- **Opening `/hist` no longer waits for a scan.** The plugin reads the
+  incremental cache at activation and publishes the grid from it, so the scene
+  paints finished numbers on the first frame instead of a spinner; the scan that
+  follows only refreshes what changed and leaves the figures on screen (the
+  status line gains a `刷新中` / `refreshing` chip) instead of dropping back to a
+  loading state. Reading the cache, folding it into records and building the view
+  measured 4 ms against the 20–30 ms of an incremental scan.
+- **A fully cached scan no longer pays per file.** The loop yielded to the event
+  loop and reported progress for *every* file, cached ones included, and each
+  report re-rendered the whole scene: 344 files meant 344 round trips and 344
+  full re-renders. On this machine's corpus that cost 614–857 ms *inside the TUI*
+  for a scan whose actual work was 20 ms, and the grid only appeared when it
+  finished. Only a decoded file yields or reports now, and reports are coalesced
+  to one per 60 ms — the same cached corpus completes in one turn with a single
+  store update.
+- **A rebuild checkpoint the cache and survive an interruption.** The cache was
+  written once, at the very end, so a host restart or dispose during the
+  multi-second first scan threw all of it away; an aborted scan even wrote back
+  only the files it had reached, discarding the rest. The scan now checkpoints
+  every 64 decoded files and merges instead of truncating when it is cut short,
+  so the work already paid for is resumed rather than repeated.
+
+### Fixed
+
+- **An empty `~/.dsh-tui/resume.txt` no longer mutes the status line.** The host
+  writes that marker empty both on `/new` and when it exits a session it cannot
+  resume (`clearResumeTarget`), so an empty marker is a normal resting state. The
+  fallback focus poll re-applied its reading once per second; after a conversation
+  claimed the line, the next tick cleared the focus again — and because the
+  cleared-focus guard then skipped that conversation's own events, its figure
+  stayed `本轮 —` for good. The poll now applies a reading only when the file's
+  content or mtime actually changed (`createMarkerWatcher`), so `/new` still gives
+  up the line and a resting empty marker does not.
+- **`totalTokens` counts cache reads.** `lib/pricing.js` counted `input +
+  output`, while `lib/history.js` and the provider's own `totalTokens` count
+  `input + cacheRead + cacheWrite + output`. On a sampled real turn the plugin's
+  figure was 61,026 against the provider's 31,282,786, and the `tokens <= 0` guard
+  in `estimateCostCny` read a cache-only report as "nothing spent" (no figure at
+  all). The CNY total was never affected — it prices the buckets directly.
+- **A turn that reported no tokens clears the line** instead of leaving the
+  previous figure in place under a "this turn" label. About 2.5% of 448 sampled
+  real turns end this way (interrupted rounds, tool-only rounds); `forgetSettled`
+  drops the remembered figure as well.
+- **The balance is labelled with its own currency.** `cnyBalance` falls back to
+  the first reported entry, so a USD account rendered as `余额 ¥5.00`; the state
+  object now carries `currency` and `formatMoney` picks the matching symbol.
+- **A usage report is filed under the tier its request STARTED in.** Bucketing
+  used the assistant message's own timestamp — the instant the answer landed —
+  while the comment claimed "the request's own timestamp". `step/start` carries
+  the request's instant, so a request issued at 11:59 and answered at 12:01 stays
+  off-peak. A turn's rates and model now come from its first report
+  (`turnModel` / `turnAt`), so a mid-turn `/model` switch or the 2026-09-14
+  Pro→Flash route change cannot reprice a whole turn.
+- **Subagent spend is folded into the parent turn.** Child sessions
+  (`origin: subagent` / `delegationDepth > 0`) were dropped entirely, so a
+  delegation-heavy turn under-reported by the child's whole share (6.76% of
+  tokens across this machine's logs). Child usage now lands in the parent
+  conversation's open turn through `parentSession`, and a background child
+  finishing after the turn closed cannot reopen it.
+
+### Changed
+
+- **The status line reports the running turn live.** While a turn is in flight
+  the figure is `本轮·计费中 ¥…` (`Turn · live`), refreshed on every usage
+  report; the settled `本轮 ¥…` appears once the turn closes. Previously the line
+  only ever showed a settled figure, so a turn in progress read `本轮 —` — or,
+  worse, the previous turn's number.
+- Part order is phase → countdown → turn → balance: a narrow terminal truncates
+  the tail, and the balance can also be had from `/balance`, while the turn cost
+  is the figure being watched.
+- `beginTurn()` (`turn/start`) drops a running bucket left behind by a turn that
+  never emitted `turn/end`, so an aborted round cannot be settled into the next
+  one.
+
 ## [0.3.2] - 2026-09-12
 
 ### Added

@@ -172,6 +172,36 @@ test('an emptied marker (/new) gives up the line, and the fresh conversation tak
   )
 })
 
+test('a resting empty marker cannot mute the conversation that owns the line', async () => {
+  await withEnv(
+    { DEEPSEEK_API_KEY: undefined, DSH_TUI_LANG: 'zh', DSH_PEAK_BALANCE_FOCUS_FILE: CLEARED_FOCUS_FIXTURE },
+    async () => {
+      // The host writes `resume.txt` empty BOTH on `/new` and when a session it
+      // cannot resume exits, so an empty marker is a normal resting state.
+      // Re-applying that reading once per poll muted whichever conversation had
+      // claimed the line — and muted it for good, because the cleared-focus
+      // guard then skipped that conversation's own events. This test is that
+      // field failure.
+      const ctx = boot({}, ['tuiPluginHost'])
+      const live = session('session-live')
+      turn(ctx, live, 100_000)
+      assert.ok(showsCost(renderLine(ctx), '¥0.1000', '¥0.2000'))
+
+      await new Promise(resolve => setTimeout(resolve, FOCUS_POLL_MS * 2 + 250))
+      assert.ok(
+        showsCost(renderLine(ctx), '¥0.1000', '¥0.2000'),
+        'an unchanged empty marker is a state, not a fresh /new',
+      )
+
+      // The conversation keeps working: its next round still reaches the line.
+      turn(ctx, live, 1_000_000)
+      assert.ok(showsCost(renderLine(ctx), '¥1.00', '¥2.00'))
+
+      ctx.__dispose()
+    },
+  )
+})
+
 test('a fresh conversation that appends before the poll notices still owns the line', async () => {
   await withEnv(
     { DEEPSEEK_API_KEY: undefined, DSH_TUI_LANG: 'zh', DSH_PEAK_BALANCE_FOCUS_FILE: FOCUS_FIXTURE },

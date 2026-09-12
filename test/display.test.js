@@ -146,3 +146,64 @@ test('the countdown tracks the phase boundary', () => {
   const near = buildDisplay({ atMs: beijing(2026, 9, 10, 11, 59), lang: 'zh', config: CONFIG })
   assert.match(partText(near), /距谷时 1m/)
 })
+
+test('a running turn shows its live figure, not the settled one', () => {
+  const model = buildDisplay({
+    atMs: PEAK_AT,
+    lang: 'zh',
+    config: CONFIG,
+    lastTurn: { cost: { total: 1 }, tokens: 100, model: 'deepseek-flash', turn: 1 },
+    live: { tokens: 250_000, cost: { total: 0.5 } },
+  })
+  const part = model.parts.find(entry => entry.key === 'turn')
+  assert.match(part.text, /本轮·计费中 ¥0\.5000/)
+  assert.equal(part.live, true)
+  assert.equal(part.tokens, 250_000)
+})
+
+test('the settled figure returns once the turn closes', () => {
+  const model = buildDisplay({
+    atMs: PEAK_AT,
+    lang: 'zh',
+    config: CONFIG,
+    lastTurn: { cost: { total: 1 }, tokens: 100, model: 'deepseek-flash', turn: 1 },
+    live: { tokens: 0, cost: undefined },
+  })
+  const part = model.parts.find(entry => entry.key === 'turn')
+  assert.match(part.text, /^本轮 ¥1\.00$/)
+  assert.equal(part.live, false)
+})
+
+test('a live turn on an unrated model says so instead of guessing', () => {
+  const model = buildDisplay({ atMs: PEAK_AT, lang: 'zh', config: CONFIG, live: { tokens: 5, cost: undefined } })
+  assert.match(model.parts.find(entry => entry.key === 'turn').text, /本轮·计费中 费率未知/)
+})
+
+test('the balance is formatted in the currency the endpoint reported', () => {
+  const usd = buildDisplay({
+    atMs: PEAK_AT,
+    lang: 'zh',
+    config: CONFIG,
+    balance: { state: 'ok', amount: 5, currency: 'USD' },
+  })
+  assert.match(usd.parts.find(entry => entry.key === 'balance').text, /余额 \$5\.00/)
+
+  const cny = buildDisplay({
+    atMs: PEAK_AT,
+    lang: 'zh',
+    config: CONFIG,
+    balance: { state: 'ok', amount: 12.34, currency: 'CNY' },
+  })
+  assert.match(cny.parts.find(entry => entry.key === 'balance').text, /余额 ¥12\.34/)
+})
+
+test('the turn figure sits ahead of the balance so truncation hits the balance first', () => {
+  const model = buildDisplay({
+    atMs: PEAK_AT,
+    lang: 'zh',
+    config: CONFIG,
+    balance: { state: 'ok', amount: 12.34, currency: 'CNY' },
+    lastTurn: { cost: { total: 0.0234 }, tokens: 100, model: 'deepseek-flash', turn: 1 },
+  })
+  assert.deepEqual(model.parts.map(part => part.key), ['phase', 'countdown', 'turn', 'balance'])
+})

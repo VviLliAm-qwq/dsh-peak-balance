@@ -17,6 +17,7 @@ import {
   parseEvents,
   readCache,
   recordFromBuffer,
+  recordsFromCache,
   scanSessions,
   sessionsRoot,
   writeCache,
@@ -270,6 +271,83 @@ test('an aborted scan stops between files and reports the abort', async () => {
     assert.equal(scan.aborted, true)
     assert.deepEqual(scan.records, [])
     assert.equal(scan.stats.scanned, 0)
+  } finally {
+    tree.cleanup()
+  }
+})
+
+test('a fully cached scan reports no progress and decodes nothing', async () => {
+  const tree = makeTree()
+  try {
+    const cachePath = historyCachePath({ DSH_TUI_STATE_DIR: tree.stateDir })
+    await scanSessions({ root: tree.root, cachePath })
+
+    const progress = []
+    const again = await scanSessions({ root: tree.root, cachePath, onProgress: step => progress.push(step) })
+    assert.equal(again.stats.reused, 2)
+    assert.equal(again.stats.scanned, 0)
+    // Nothing was decoded, so there is no work to report. A tick per file here
+    // is what turned a 20 ms scan into ~600 ms inside the TUI: every tick
+    // re-rendered the whole `/hist` grid.
+    assert.deepEqual(progress, [])
+  } finally {
+    tree.cleanup()
+  }
+})
+
+test('an interrupted rebuild keeps the cache entries it never reached', async () => {
+  const tree = makeTree()
+  try {
+    const cachePath = historyCachePath({ DSH_TUI_STATE_DIR: tree.stateDir })
+    await scanSessions({ root: tree.root, cachePath })
+
+    const controller = new AbortController()
+    controller.abort()
+    const aborted = await scanSessions({ root: tree.root, cachePath, signal: controller.signal })
+    assert.equal(aborted.aborted, true)
+    assert.equal(aborted.stats.scanned, 0)
+    // The aborted run visited no file at all, so the previous scan's work must
+    // still be there — writing only what this run touched would discard it.
+    assert.equal(Object.keys(readCache({ cachePath }).files).length, 2)
+  } finally {
+    tree.cleanup()
+  }
+})
+
+test('a long rebuild checkpoints the cache so a restart resumes it', async () => {
+  const tree = makeTree()
+  try {
+    const documents = []
+    const scan = await scanSessions({
+      root: tree.root,
+      cachePath: join(tree.stateDir, 'cache.json'),
+      checkpointEvery: 1,
+      writeFile: (file, text) => documents.push(JSON.parse(text)),
+    })
+    assert.equal(scan.stats.scanned, 2)
+    // One checkpoint per decoded file, then the final prune: the file on disk
+    // is never missing the records an interrupted run already paid for.
+    assert.equal(documents.length, 3)
+    assert.equal(Object.keys(documents[0].files).length, 1)
+    assert.equal(Object.keys(documents[1].files).length, 2)
+    assert.equal(Object.keys(documents.at(-1).files).length, 2)
+  } finally {
+    tree.cleanup()
+  }
+})
+
+test('recordsFromCache restores the scan order and skips unusable entries', async () => {
+  const tree = makeTree()
+  try {
+    const cachePath = historyCachePath({ DSH_TUI_STATE_DIR: tree.stateDir })
+    const scan = await scanSessions({ root: tree.root, cachePath })
+    const records = recordsFromCache(readCache({ cachePath }))
+    assert.deepEqual(records.map(record => record.id), scan.records.map(record => record.id))
+
+    // A hand-edited or future document must not smuggle a shape the view reads.
+    assert.deepEqual(recordsFromCache({ files: { a: { size: 1 }, b: null } }), [])
+    assert.deepEqual(recordsFromCache(undefined), [])
+    assert.deepEqual(recordsFromCache({ files: null }), [])
   } finally {
     tree.cleanup()
   }

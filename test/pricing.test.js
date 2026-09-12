@@ -86,6 +86,25 @@ test('empty accounting yields no cost figure', () => {
   assert.equal(totalTokens(undefined), 0)
 })
 
+test('totalTokens counts every reported count, cache reads included', () => {
+  // The provider's own `totalTokens` is input + cacheRead (+ cacheWrite) +
+  // output. Counting only input + output under-reported a warm turn by orders
+  // of magnitude (a sampled turn: 61k instead of 31.3M) and let the
+  // `tokens <= 0` guard read a cache-only report as "nothing spent".
+  const buckets = {
+    peak: { input: 1_000, output: 2_000, cacheRead: 30_000_000, cacheWrite: 5 },
+    idle: { input: 4, output: 0, cacheRead: 0, cacheWrite: 0 },
+  }
+  assert.equal(totalTokens(buckets), 30_003_009)
+})
+
+test('a cache-only report still has a price', () => {
+  const onlyCacheRead = { peak: BUCKET(0, 0), idle: BUCKET(0, 0, 1_000_000) }
+  const cost = estimateCostCny(onlyCacheRead, 'deepseek-flash')
+  assert.equal(cost.tokens, 1_000_000)
+  assert.equal(cost.total, 0.02) // 1M cache hits at the off-peak hit rate
+})
+
 test('a small realistic turn is priced to the cent fraction', () => {
   // 12k miss input + 800 output on flash off-peak.
   const cost = estimateCostCny({ peak: BUCKET(0, 0), idle: BUCKET(12_000, 800) }, 'deepseek-flash')

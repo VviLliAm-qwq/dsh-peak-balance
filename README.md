@@ -7,15 +7,21 @@ Peak/off-peak billing clock, live DeepSeek account balance, per-turn cost and a
 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI).
 
 ```
-⚡ 峰时 09:00-12:00 · 距谷时 1h23m · 余额 ¥42.10 · 本轮 ¥0.0234
+⚡ 峰时 09:00-12:00 · 距谷时 1h23m · 本轮 ¥0.0234 · 余额 ¥42.10
 ```
+
+(The order is phase → countdown → turn → balance: a narrow terminal truncates
+the tail, and the per-turn cost is the figure that changes while you watch. While
+the model is still answering, the turn figure is **live** — rendered as
+`本轮·计费中 ¥…` and refreshed on every usage report — and it freezes to
+`本轮 ¥…` once the turn closes.)
 
 While the peak window is active you can turn the line into a three-row frame
 that pulses in one of seven colors:
 
 ```
 ╭──────────────────────────────────────────────────────────╮
-│ ⚡ 峰时 · 距谷时 1h23m · 余额 ¥42.10 · 本轮 ¥0.0234   ▂▃▄▅▆▇ │
+│ ⚡ 峰时 · 距谷时 1h23m · 本轮 ¥0.0234 · 余额 ¥42.10   ▂▃▄▅▆▇ │
 ╰──────────────────────────────────────────────────────────╯
 ```
 
@@ -105,7 +111,7 @@ Main card:
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | Show balance | boolean | `true` | Show the account balance on the status line. |
-| Show per-turn cost | boolean | `true` | Show the estimated cost of the last completed turn. |
+| Show per-turn cost | boolean | `true` | Show what this turn has cost: a live estimate while the model answers, frozen when the turn closes. |
 | Peak-hour warning | boolean | `false` | Turn the line into a pulsing frame while peak pricing is active. |
 | Warning color | select | `red` | Frame color: `red` `orange` `yellow` `green` `cyan` `blue` `purple`. |
 
@@ -220,11 +226,14 @@ real logs):
    without it a naive sum counts the parent's usage twice — 292 usage reports
    (~4.5%) across this machine's nine seeded logs.
 
-**Cache.** The first full scan takes a few seconds (341 logs / ~80 MB here) and
-shows `scanning x/y` in the scene; after that the cache is incremental keyed by
-`(path, size, mtime)` and lands in 20–30 ms. It lives at
-`~/.dsh-tui/dsh-peak-balance-history.json` (safe to delete — it rebuilds). While
-the scene is open it re-scans incrementally once a minute; closing it stops that.
+**Cache.** Activation reads the incremental cache and paints the grid from it, so
+opening the scene is instant; the scan that follows only refreshes what changed.
+The cache is keyed by `(path, size, mtime)` and an up-to-date corpus lands in
+20–30 ms. It lives at `~/.dsh-tui/dsh-peak-balance-history.json` (safe to
+delete — it rebuilds); the one genuinely slow case is that first rebuild on a
+large corpus, which checkpoints as it goes so an interrupted run resumes instead
+of starting over. While the scene is open it re-scans once a minute behind the
+figures (the status line shows `refreshing`); closing it stops that.
 
 ## How the numbers are produced
 
@@ -323,6 +332,10 @@ overrides the file path for tests and diagnostics.
   requires a plugin update; a model the card does not list needs `/hist price set`.
 - The balance endpoint needs a DeepSeek official API key. Other providers are
   detected and simply show no balance.
+- **The balance is shown in the currency the endpoint reports.** The payload
+  carries `currency` (`CNY`, `USD`, …), and the line uses the matching symbol
+  (`¥`, `$`); an unknown currency falls back to its ISO code (`12.34 CHF`)
+  instead of passing a dollar figure off as yuan.
 - Rich status contributions share a six-row budget with other plugins; this one
   requests three rows, and only while the warning frame is visible.
 - The line follows the conversation the host reports as **focused**: switching
@@ -330,8 +343,25 @@ overrides the file path for tests and diagnostics.
   CONVERSATION, so leaving one and coming back still shows that conversation's
   own last turn; `—` appears only when the focused conversation has no settled
   turn in this process yet (a conversation just started with `/new`), never
-  another conversation's figure. Subagent sessions are ignored on purpose, so a
-  delegated child never rewrites your turn cost.
+  another conversation's figure.
+- **Subagent spend counts toward the turn that spawned it.** A child session's
+  usage is folded into the parent conversation's running turn via the
+  `parentSession` in its session header; a background child that reports after
+  the parent's turn closed no longer counts (that turn is settled). A host that
+  names no parent keeps the old behaviour and ignores the child. Note that
+  `/hist` reports subagents separately (its own "count subagents" switch), so its
+  grand total and the status line are not the same measurement by design.
+- **An empty marker is a resting state, not a repeated `/new`.** The host writes
+  `~/.dsh-tui/resume.txt` empty both on `/new` and when it exits a session it
+  cannot resume, so the plugin applies that reading only when the file's content
+  or mtime actually changes. Earlier versions re-applied it once per poll, which
+  muted the conversation that owned the line — permanently, since the
+  cleared-focus guard then skipped that conversation's own events.
+- **Billing verdicts are fixed per request and per turn.** A usage report is
+  filed under the tier its request STARTED in (`step/start`), and a turn's rates
+  and model come from its first report, so a mid-turn model switch or the
+  2026-09-14 Pro→Flash route change cannot reprice a whole turn retroactively.
+  Settlement itself only matters for a turn that recorded no report at all.
 - **A bare `/th` + Enter is captured by the host's completion overlay** (see
   "Why a bare /th + Enter switches the theme"): the plugin cannot move its own
   entry to the front of that list. Use `/hist`, `/tokenhistory`, `alt+h`, or
@@ -340,9 +370,10 @@ overrides the file path for tests and diagnostics.
 - **The history covers only this machine's dsh usage.** Calls made elsewhere
   (web chat, other clients, other machines) are not in these logs, and the
   earliest covered day is whatever the local logs still hold.
-- **The first `/th` needs a few seconds** for the full scan (341 logs / ~80 MB
-  here ≈ 4–5 s) and shows progress while it runs; afterwards the incremental
-  cache answers in 20–30 ms.
+- **The first `/th` on a machine with no cache** needs a few seconds for the full
+  scan (341 logs / ~80 MB here ≈ 4–5 s) and shows progress while it runs; the
+  scan checkpoints as it goes, so an interrupted first run resumes. Once the
+  cache exists, opening the scene answers from it immediately.
 - **Mouse hover needs the full-screen (alternate screen) layout** — the profile
   ships `fullscreen: true`. In inline mode the keyboard (`←/→/↑/↓`) selects days
   and shows the same detail card.
