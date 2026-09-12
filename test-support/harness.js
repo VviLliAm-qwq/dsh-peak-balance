@@ -7,6 +7,7 @@
  * language or session marker can never steer an assertion.
  */
 
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -19,6 +20,24 @@ const here = dirname(fileURLToPath(import.meta.url))
  * unless a test opts into it — never the developer's real `~/.dsh-tui/resume.txt`.
  */
 export const ABSENT_FOCUS_FILE = join(here, 'no-such-focus-marker.txt')
+
+/**
+ * A plugin state directory that does not exist.
+ *
+ * Deliberately under the OS temp directory: `apply()` reads a custom rate file
+ * from here, and a test that also *writes* one must never litter the repository.
+ */
+export const ABSENT_STATE_DIR = join(tmpdir(), 'dsh-peak-balance-test-state')
+
+/** A `$DSH_HOME` that does not exist, so a scan finds no session logs at all. */
+export const ABSENT_DSH_HOME = join(here, 'no-such-dsh-home')
+
+/**
+ * A language-preference file that does not exist, so a test never reads the
+ * developer's own `/lang` choice. Tests that exercise the file path point
+ * `DSH_PEAK_BALANCE_LANG_FILE` at a temp file of their own.
+ */
+export const ABSENT_LANG_FILE = join(here, 'no-such-lang.json')
 
 /** Marker fixture naming {@link FIXTURE_SESSION_ID}. */
 export const FOCUS_FIXTURE = join(here, 'focus-marker.txt')
@@ -37,6 +56,10 @@ export function makeCtx(options = {}) {
     sections: [],
     views: [],
     decisions: [],
+    commands: [],
+    scenes: [],
+    trees: [],
+    shortcuts: [],
     listeners: new Map(),
     cleanups: [],
     logs: [],
@@ -94,9 +117,13 @@ export function makeServices(record, overrides = {}) {
       register(ns, schema) {
         record.settings.push({ ns, schema })
         return {
-          get: () => ({}),
+          get: () => record.settingsValues?.[ns] ?? {},
           watch: () => () => {},
         }
+      },
+      /** Public read of another namespace — how the plugin sees `dsh-tui.lang`. */
+      get(namespace) {
+        return record.settingsValues?.[namespace]
       },
       ...overrides.settings,
     },
@@ -126,6 +153,49 @@ export function makeServices(record, overrides = {}) {
         }
       },
       ...overrides.tuiPluginHost,
+    },
+    commands: {
+      register(definition) {
+        record.commands.push(definition)
+        return () => {
+          record.commandDisposed = true
+        }
+      },
+      ...overrides.commands,
+    },
+    tuiScenes: {
+      register(descriptor) {
+        record.scenes.push(descriptor)
+        return () => {
+          record.sceneDisposed = true
+        }
+      },
+      open(id) {
+        record.sceneOpened = id
+        return record.scenes.some(descriptor => descriptor.id === id)
+      },
+      get active() {
+        return undefined
+      },
+      ...overrides.tuiScenes,
+    },
+    tuiCommandTrees: {
+      register(provider) {
+        record.trees.push(provider)
+        return () => {
+          record.treeDisposed = true
+        }
+      },
+      ...overrides.tuiCommandTrees,
+    },
+    tuiShortcuts: {
+      register(combo, options) {
+        record.shortcuts.push({ combo, ...options })
+        return () => {
+          record.shortcutDisposed = true
+        }
+      },
+      ...overrides.tuiShortcuts,
     },
   }
 }
@@ -174,7 +244,9 @@ export function withEnv(overrides, body) {
 
 /**
  * Pin everything that could reach outside the test process: the DeepSeek key
- * (balance lookups), the UI language and the focused-session marker.
+ * (balance lookups), the UI language (both the env pin and the persisted file),
+ * the plugin's state directory (the custom rate file) and the focused-session
+ * marker.
  */
 export function withoutSecrets(body) {
   withEnv(
@@ -182,6 +254,9 @@ export function withoutSecrets(body) {
       DEEPSEEK_API_KEY: undefined,
       DSH_TUI_LANG: 'zh',
       DSH_PEAK_BALANCE_FOCUS_FILE: ABSENT_FOCUS_FILE,
+      DSH_PEAK_BALANCE_LANG_FILE: ABSENT_LANG_FILE,
+      DSH_TUI_STATE_DIR: ABSENT_STATE_DIR,
+      DSH_HOME: ABSENT_DSH_HOME,
     },
     body,
   )

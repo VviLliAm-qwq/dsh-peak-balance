@@ -5,10 +5,13 @@ import {
   FLASH_RATES,
   PRO_RATES,
   PRO_ROUTES_TO_FLASH_AT,
+  baseModelId,
   bucketCostCny,
   emptyBuckets,
   estimateCostCny,
   rateCardFor,
+  rateSourceOf,
+  resolveRateCard,
   totalTokens,
 } from '../lib/pricing.js'
 
@@ -88,4 +91,59 @@ test('a small realistic turn is priced to the cent fraction', () => {
   const cost = estimateCostCny({ peak: BUCKET(0, 0), idle: BUCKET(12_000, 800) }, 'deepseek-flash')
   assert.equal(cost.total, (12_000 * 1 + 800 * 4) / 1_000_000)
   assert.ok(Math.abs(cost.total - 0.0152) < 1e-12)
+})
+
+test('baseModelId strips only the provider prefix', () => {
+  assert.equal(baseModelId('deepseek-official/deepseek-flash'), 'deepseek-flash')
+  assert.equal(baseModelId(' DeepSeek-Flash '), 'deepseek-flash')
+  assert.equal(baseModelId('deepseek-flash'), 'deepseek-flash')
+  assert.equal(baseModelId(''), '')
+  assert.equal(baseModelId(undefined), '')
+})
+
+test('custom rates win over the built-in card', () => {
+  const custom = {
+    'deepseek-flash': {
+      idle: { inputHit: 1, inputMiss: 1, output: 1 },
+      peak: { inputHit: 2, inputMiss: 2, output: 2 },
+    },
+  }
+  assert.equal(resolveRateCard('deepseek-flash'), FLASH_RATES)
+  assert.equal(resolveRateCard('deepseek-flash', Date.now(), custom).idle.inputMiss, 1)
+  assert.equal(resolveRateCard('deepseek-official/deepseek-flash', Date.now(), custom).peak.inputMiss, 2)
+  // A flat entry (hand-written) is usable in both windows.
+  const flat = resolveRateCard('mystery', Date.now(), { mystery: { inputHit: 1, inputMiss: 2, output: 3 } })
+  assert.deepEqual(flat.idle, { inputHit: 1, inputMiss: 2, output: 3 })
+  assert.equal(flat.peak, flat.idle)
+  // Nonsense custom entries fall through to the card instead of pricing wrongly.
+  assert.equal(resolveRateCard('deepseek-flash', Date.now(), { 'deepseek-flash': 'nope' }), FLASH_RATES)
+  assert.equal(resolveRateCard('deepseek-flash', Date.now(), { 'deepseek-flash': null }), FLASH_RATES)
+  assert.equal(resolveRateCard('mystery', Date.now(), null), undefined)
+})
+
+test('rateSourceOf names the provenance of the rates', () => {
+  const custom = { mystery: { idle: { inputHit: 1, inputMiss: 1, output: 1 }, peak: { inputHit: 2, inputMiss: 2, output: 2 } } }
+  assert.equal(rateSourceOf('deepseek-flash'), 'builtin')
+  assert.equal(rateSourceOf('deepseek-v4-pro'), 'builtin')
+  assert.equal(rateSourceOf('mystery'), 'unknown')
+  assert.equal(rateSourceOf('mystery', custom), 'custom')
+  assert.equal(rateSourceOf('', custom), 'unknown')
+  assert.equal(rateSourceOf(undefined, custom), 'unknown')
+})
+
+test('estimateCostCny accepts custom rates end to end', () => {
+  const buckets = { peak: BUCKET(1_000_000, 0), idle: BUCKET(1_000_000, 0) }
+  const custom = {
+    'deepseek-flash': {
+      idle: { inputHit: 1, inputMiss: 1, output: 1 },
+      peak: { inputHit: 10, inputMiss: 10, output: 10 },
+    },
+  }
+  const cost = estimateCostCny(buckets, 'deepseek-flash', Date.now(), custom)
+  assert.equal(cost.peak, 10)
+  assert.equal(cost.idle, 1)
+  assert.equal(cost.total, 11)
+  // An unrated model stays unrated even with unrelated custom rates present.
+  assert.equal(estimateCostCny(buckets, 'mystery', Date.now(), custom), undefined)
+  assert.equal(estimateCostCny(buckets, 'mystery', Date.now(), { mystery: { idle: {}, peak: {} } }), undefined)
 })

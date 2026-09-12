@@ -4,6 +4,99 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - 2026-09-12
+
+### Added
+
+- **The plugin follows dsh-TUI's `/lang` switch.** The status line, the history
+  scene and every command reply now repaint in the host's language the moment it
+  changes. dsh-TUI mirrors its choice into its own `dsh-tui` settings namespace,
+  and the dsh settings service emits `settings/updated(ns, next, prev, source)`
+  on every commit — the plugin subscribes to that (a public Cordis event, no host
+  internals) and repaints both surfaces. A 1 s poll of `~/.dsh-tui/lang.json`,
+  guarded by an mtime/size stamp, covers hosts that serve no `dsh-tui`
+  namespace, so `/lang` still lands within about a second there.
+- Startup resolution now matches dsh-TUI's own order: `DSH_TUI_LANG` → the live
+  `dsh-tui.lang` setting → `~/.dsh-tui/lang.json` → the OS locale. An ABSENT
+  locale keeps the historical `zh`, while any other unsupported locale falls
+  back to `en` (a German user must not be handed a Chinese UI), exactly as the
+  host does.
+- `DSH_PEAK_BALANCE_LANG_FILE` overrides the preference-file path for tests and
+  diagnostics, mirroring `DSH_PEAK_BALANCE_FOCUS_FILE`.
+- Both READMEs now open with a **language switcher** (`English · 中文` /
+  `中文 · English`) and cover the same sections: the Chinese one gained the
+  "Publishing and versioning" and "Listing" sections it was missing.
+
+### Changed
+
+- `resolveLang()` is still pure and injectable; the host's live language is read
+  separately through `settings.get('dsh-tui')`, so a `/lang` switch made after
+  the process started is visible to the plugin.
+
+## [0.3.1] - 2026-09-12
+
+### Fixed
+
+- **The model table's columns drifted on a CJK interface.** Every cell was
+  padded by `String#length`, which counts CJK and emoji as ONE cell while a
+  terminal draws them as TWO — so the header `总 token` (8 cells, 7 code points)
+  pushed every column to its right out of line with its values. Cells are now
+  laid out as fixed-width `Box`es (the host pads and right-aligns inside them),
+  and every fit/truncate decision uses a cell-accurate width
+  (`displayWidth` / `clipWidth`), so a wide label can neither shift a neighbour
+  nor spill into it.
+- The detail card and the totals rows put their labels in one fixed 12-cell
+  column instead of a hand-padded one, so both blocks start their values on the
+  same cell; the totals row uses the short label (`子代理` / `subagents`) rather
+  than a wide sentence.
+- `hit rate` (8 cells) no longer truncates in the English header: the hit-rate
+  column gained the cell its gap needs.
+- Month labels (`9月` / `Sep` are 3-4 cells in a 2-cell week column) claim the
+  next column's empty slot, so the axis stays cell-exact above the grid.
+
+## [0.3.0] - 2026-09-12
+
+### Added
+
+- **`/hist` — the short name that actually runs.** A bare `/th` + Enter cannot
+  reach this plugin: dsh-tui's slash-completion overlay executes the HIGHLIGHTED
+  suggestion, the merged list is built-ins first, and `theme`/`thinking` both
+  match the `th` prefix, so `/th` + Enter switched the theme. `/hist` is a
+  prefix of no built-in, so the overlay offers exactly one row and Enter runs it.
+  `/th` (with a trailing space) and `/tokenhistory` still work.
+- **`alt+h` opens the history scene** from the plain chat state, through
+  `ctx.tuiShortcuts` (ctrl/alt required; `alt+h` collides with nothing).
+- **`Scene layout` setting** (`card` / `plain`): the card frames the scene in a
+  rounded box with section separators and an inline day card; plain drops the
+  chrome and spends those 2 rows / 4 columns on content. The card degrades to
+  plain by itself when the terminal cannot hold it.
+- **Subagent-switch feedback**: a permanent `subagents counted/excluded` chip in
+  the title bar, a 1.2 s inversion on the `s` key, and a totals row that spells
+  out `excluded N sessions / M reports` (the aggregation now reports what the
+  filter dropped instead of discarding it silently).
+
+### Changed
+
+- **The arrows move the SELECTED SQUARE, not the calendar**: `←`/`→` step one
+  week column (same weekday), `↑`/`↓` step one weekday row (±1 day) inside the
+  column, and a move into a future square or past the grid edge is refused. `t`
+  jumps back to today. Previously `←`/`→` were ±1 day and `↑`/`↓` were ±7 days.
+- **The selected square is lightened and a `▲` row under the grid points at its
+  column**, instead of drawing `[]` inside the tile (which obscured the color
+  that carries the data).
+- **`m` / `w` / `s` now write back to the settings namespace** (they persist and
+  survive a restart) instead of changing only the current viewing session. The
+  optimistic local override flips the UI immediately; a refused write keeps the
+  change for the session and logs once.
+- **Responsive layout**: rows and columns are budgeted explicitly. Width trims
+  week columns (with a `showing 27/53w` chip and a window that scrolls one column
+  at a time to follow the selection) rather than shrinking squares; height drops
+  the model table, then the day card's fields one by one, then the totals. Under
+  12 rows or 40 columns the scene switches to a fallback list. Every row is drawn
+  with `truncate`, so nothing depends on the host clipping.
+- The model table's column widths are computed from the terminal width, numbers
+  are right-aligned, and the rate-source column is dropped on a narrow terminal.
+
 ## [0.1.11] - 2026-09-12
 
 ### Fixed

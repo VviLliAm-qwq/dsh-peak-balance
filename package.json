@@ -1,7 +1,7 @@
 {
   "name": "dsh-peak-balance",
-  "version": "0.1.11",
-  "description": "Peak/off-peak billing clock with live DeepSeek account balance and per-turn cost for dsh-tui: a status line above the prompt, an optional flashing peak-hour warning frame, and a settings card with four switches (balance, per-turn cost, warning mode, warning color)",
+  "version": "0.3.2",
+  "description": "Peak/off-peak billing clock with live DeepSeek account balance, per-turn cost and a /hist token-history scene (daily usage/cost grid, grand totals, per-model stats, custom rates) for dsh-tui",
   "license": "MIT",
   "packageManager": "pnpm@11.22.0",
   "type": "module",
@@ -25,7 +25,11 @@
     "pricing",
     "peak",
     "off-peak",
-    "cost"
+    "cost",
+    "token-history",
+    "usage",
+    "scene",
+    "command"
   ],
   "files": [
     "lib",

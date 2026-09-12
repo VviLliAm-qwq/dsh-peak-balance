@@ -87,3 +87,23 @@ test('addToBucket sums counts in place', () => {
   addToBucket(bucket, { input: 2, output: 3, cacheRead: 4, cacheWrite: 5 })
   assert.deepEqual(bucket, { input: 3, output: 3, cacheRead: 4, cacheWrite: 5 })
 })
+
+test('the settled turn honours custom rates', () => {
+  const tracker = createTracker()
+  tracker.setModel('mystery-model')
+  // An unrated model reports no cost at all…
+  tracker.onUsage({ inputTokens: 1_000_000 }, beijing(2026, 9, 10, 13, 0))
+  assert.equal(tracker.endTurn(beijing(2026, 9, 10, 13, 0)).cost, undefined)
+
+  // …until the user supplies the rate for it (off-peak 2 元 per 1M miss).
+  const customRates = {
+    'mystery-model': {
+      idle: { inputHit: 1, inputMiss: 2, output: 3 },
+      peak: { inputHit: 4, inputMiss: 8, output: 16 },
+    },
+  }
+  tracker.onUsage({ inputTokens: 1_000_000 }, beijing(2026, 9, 10, 13, 0))
+  assert.equal(tracker.endTurn(beijing(2026, 9, 10, 13, 0), customRates).cost.total, 2)
+  // The first turn's tokens still count in the session total: 2M at 2 元/M.
+  assert.equal(tracker.sessionCost(beijing(2026, 9, 10, 13, 0), customRates).total, 4)
+})

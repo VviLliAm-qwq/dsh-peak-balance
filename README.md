@@ -1,7 +1,10 @@
 # dsh-peak-balance
 
-Peak/off-peak billing clock, live DeepSeek account balance and per-turn cost —
-rendered above the prompt in [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI).
+**English** · [中文](README.zh.md)
+
+Peak/off-peak billing clock, live DeepSeek account balance, per-turn cost and a
+`/hist` token-history grid — inside
+[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI).
 
 ```
 ⚡ 峰时 09:00-12:00 · 距谷时 1h23m · 余额 ¥42.10 · 本轮 ¥0.0234
@@ -16,6 +19,39 @@ that pulses in one of seven colors:
 ╰──────────────────────────────────────────────────────────╯
 ```
 
+`/hist` (also `/tokenhistory`, `alt+h`, or `/th` with a trailing space — see
+below) takes over the whole terminal with a GitHub-style contribution grid:
+
+```
+╭─ 🐋 Token history  Total tokens  26w  subagents counted ───────────────── ✕ ─╮
+│ updated 12:04:11 · 341 sessions · 6,706 reports · 9 active days               │
+│ ───────────────────────────────────────────────────────────────────────────── │
+│      6月      7月      8月      9月                                           │
+│ Mon  ▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢                                               │
+│ Wed  ▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢                                               │
+│ Fri  ▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢                                               │
+│                       ▲                                                       │
+│ Total tokens less ▢▢▢▢▢ more · peak 251,442,584                               │
+  ╭─ 2026-09-11 Fri ───────────────────────────────────────────────────────╮
+  │ tokens      input(miss) 2,065,340 · cache read 224.3M · output 1.5M       │
+  │ cost        ¥18.8494                                                      │
+  │ cache hit   99.1% · subagent share 12.4%                                  │
+  │ model       deepseek-flash 227.9M · deepseek-v4-pro 3.2M                  │
+  ╰───────────────────────────────────────────────────────────────────────────╯
+│ Total       1,079,834,040 · Est. cost ¥64.6867 · cache hit 99.0%              │
+│ subagents   36/341 sessions · 945 reports · busiest 2026-09-11                │
+│ ───────────────────────────────────────────────────────────────────────────── │
+│ model                              tokens   cost(est) hit rate    rates       │
+│ ───────────────────────────────────────────────────────────────────────────── │
+│ deepseek-flash                     587.3M      ¥33.94    99.3% built-in       │
+│ deepseek-v4-flash-vision-exp       412.6M      ¥24.53    98.8% built-in       │
+│ deepseek-v4.1-flash-expires…        68.2M           —    98.5%  unknown       │
+│ deepseek-v4-pro                      8.0M       ¥4.28    95.4% built-in       │
+│ deepseek-v4-flash                  457.2k     ¥0.0975    90.1% built-in       │
+│ ←/→ week · ↑/↓ day · t today · m metric · w span · s subagents · r rescan · q/Esc close │
+╰───────────────────────────────────────────────────────────────────────────────╯
+```
+
 ## Features
 
 | Feature | What it shows |
@@ -24,7 +60,11 @@ that pulses in one of seven colors:
 | Live balance | Your DeepSeek account balance, refreshed after **every completed turn** and once a minute in the background. |
 | Per-turn cost | What the turn that just finished cost, in CNY, priced from the official rate card — peak and off-peak usage are priced separately, by each request's own timestamp. The figure follows the conversation you are **focused on**, not the one that last appended an event. |
 | Peak-hour warning | Optional. While peak pricing is active the status contribution becomes a rounded frame whose border, phase label and travelling waveform pulse in the chosen color. |
-| Settings card | A new **Peak & Balance** card on the `/settings` screen, with its four switches rendered directly on the card — no subpage to open. |
+| History grid `/th` | A full-screen scene: one square per day, shaded by that day's usage, with a hover card for the day under the pointer. Keyboard: `←/→` walks days, `↑/↓` walks weeks, `m` cycles the metric, `w` the span, `s` the subagent switch, `r` rescans, `q`/`Esc` returns to the conversation. |
+| Totals and per-model stats | Totals: tokens, estimated cost, cache-hit rate, active days, sessions, subagent share, busiest day. Model table: each model's total tokens, estimated cost, cache-hit rate and where its rates came from. |
+| Custom rates `/th price` | Price a model the embedded card does not list; until you do, it reports tokens with an explicit "unrated" marker instead of a guessed amount. |
+| Follows the UI language | **Instant** hand-off with dsh-TUI's `/lang`: the status line, the history scene and every command reply switch with it. The host mirrors the choice into its `dsh-tui` settings namespace and the plugin listens for `settings/updated`; a 1 s poll of `~/.dsh-tui/lang.json` covers hosts that serve no such namespace. The settings card and the command-completion descriptions were already bilingual. |
+| Settings subpage | The **Peak & Balance** card gains a **Token history** subpage with ten options. |
 
 ## Install
 
@@ -60,6 +100,8 @@ row; the settings card appears under `/settings` immediately after the restart.
 `/settings` → the **Peak & Balance** card. Edits are written live; no restart is
 needed.
 
+Main card:
+
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | Show balance | boolean | `true` | Show the account balance on the status line. |
@@ -67,8 +109,122 @@ needed.
 | Peak-hour warning | boolean | `false` | Turn the line into a pulsing frame while peak pricing is active. |
 | Warning color | select | `red` | Frame color: `red` `orange` `yellow` `green` `cyan` `blue` `purple`. |
 
+**Token history** subpage:
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| Grid metric | select | `tokens` | What the squares shade: `tokens`, `cost`, `output`, `cacheMiss`. |
+| Time span | select | `26` | Week columns drawn: `13` / `26` / `53`. |
+| Count subagents | boolean | `true` | Subagent sessions spend real tokens; off reports only your own conversations. |
+| Week starts on | select | `mon` | Which weekday is the grid's first row (`mon` / `sun`). |
+| Grid palette | select | `github` | `github` (green), `blue`, or `theme` (the active accent). |
+| Scene layout | select | `card` | `card` frames the scene in a rounded box with section separators; `plain` drops the chrome (2 rows / 4 columns cheaper). Card falls back to plain by itself on a small terminal. |
+| Hover: tokens | boolean | `true` | Show the input / cache-read / output split in the day card. |
+| Hover: cost | boolean | `true` | Show the hovered day's estimated cost. |
+| Hover: cache hit rate | boolean | `true` | Show the hovered day's cache-hit rate. |
+| Hover: models | boolean | `true` | Show which models the hovered day used. |
+
 The settings live in the `dsh-peak-balance` namespace of the dsh settings
-document, so they can also be edited there directly.
+document, so they can also be edited there directly. **The scene's `m` / `w` / `s`
+keys are settings changes**: they write back immediately (and survive a restart);
+if the write is refused the change stays for the current session and a warning is
+logged.
+
+## `/hist` — token history
+
+```sh
+/hist                                 # open the grid (recommended: no built-in collision)
+/tokenhistory                         # the long alias
+alt+h                                 # same thing without typing
+/th                                   # works too, but keep the trailing space (see below)
+/hist price                           # list custom rates and unrated models
+/hist price set <model> <hit> <miss> <out> [peakHit peakMiss peakOut]
+/hist price rm <model>
+/hist price clear
+```
+
+### Why a bare `/th` + Enter switches the theme
+
+A host behaviour the plugin cannot change, stated plainly: while dsh-tui's
+slash-completion overlay is open, Enter runs the **highlighted suggestion**, not
+the line you typed (`handleEnter` in `PromptInput.js`); the merged list puts
+built-ins first and appends plugin commands, and the selection resets to the
+first row. Typing `/th` matches `theme`, `thinking` and our `th`, so the
+highlight sits on `theme` and Enter switches the theme.
+
+| Entry point | Note |
+| --- | --- |
+| `/hist` | **Recommended.** `hist` is not a prefix of any built-in, so the menu offers only it and Enter runs it. |
+| `/tokenhistory` | Same, no collision. |
+| `alt+h` | Opens the scene straight from the chat state. |
+| `/th ` + Enter | Keep the trailing **space**: the menu closes (no children), and Enter dispatches `th`. |
+
+> A future SKILL whose name starts with `hist` would capture `/hist`'s Enter the
+> same way — same host logic; rename then (it is one constant in the code).
+
+### Keyboard
+
+| Key | Effect |
+| --- | --- |
+| `←` / `→` | Move to the **square to the left/right** (same weekday, one week) |
+| `↑` / `↓` | Move to the **square above/below** (same column, one day) |
+| `t` | Jump back to today |
+| `m` / `w` / `s` | Cycle metric / span / subagents (the matching chip flashes; the change is persisted) |
+| `r` | Rescan |
+| `q` / `Esc` | Back to the conversation |
+
+Moves stop at the grid edge and never enter a day that has not happened yet (no
+wrapping). The selected square is lightened and a `▲` under the grid points at its
+column.
+
+**Subagent feedback:** the title bar carries a permanent chip (`subagent counted`
+— green — or `subagent excluded`), pressing `s` inverts it for 1.2 s, and the
+totals row spells out `excluded N sessions / M reports` instead of just shrinking
+the numbers.
+
+**The data source is this machine's session logs** (`$DSH_HOME/sessions/`). Every
+`assistant/message` event in those logs carries the usage DeepSeek returned for
+that request (`inputTokens` / `cacheReadTokens` / `outputTokens` /
+`cacheWriteTokens`); the plugin files each report into the Beijing calendar day
+and the peak/off-peak tier of **its own timestamp**, then per model. So:
+
+- **tokens are the provider's own reported numbers**, not a local estimate;
+- **money is an estimate** (the API returns tokens, never money), converted with
+  the embedded rate card or your custom rates, and labelled as such;
+- only **this machine's dsh usage** is covered — web chat or other clients are not;
+- the covered range is whatever this machine's logs still hold.
+
+**Subagents** count by default (they spend real money), stay distinguishable, and
+can be switched off.
+
+**Unrated models** (not on the embedded card) show tokens with `—` for money
+until you give them rates through `/hist price set`. Custom rates are written
+immediately to `~/.dsh-tui/dsh-peak-balance-rates.json` and feed both the history
+view and the status line's per-turn figure. `<hit> <miss> <out>` are the
+**off-peak** prices in CNY per million tokens; peak defaults to twice those (the
+official rule), and you can pass three more numbers to set the peak tier
+explicitly.
+
+**Two implementation details that decide the accuracy** (both reproducible on
+real logs):
+
+1. The logs are **multi-frame zstd** (one frame per append).
+   `zlib.zstdDecompressSync` stops after the first frame, and scanning for the
+   magic bytes can hit the magic *inside* a compressed block — where a truncated
+   decode still "succeeds" with partial content and silently drops events. The
+   plugin parses the zstd frame and block headers to compute each frame's exact
+   length: on this machine's 341 logs the byte-scanning approach lost 282 events,
+   the header walk recovers all of them.
+2. Fork/rewind logs **physically carry their parent's event prefix**. The cut is
+   the header's `seedLength` (the first `session/end-seed` event sits on it);
+   without it a naive sum counts the parent's usage twice — 292 usage reports
+   (~4.5%) across this machine's nine seeded logs.
+
+**Cache.** The first full scan takes a few seconds (341 logs / ~80 MB here) and
+shows `scanning x/y` in the scene; after that the cache is incremental keyed by
+`(path, size, mtime)` and lands in 20–30 ms. It lives at
+`~/.dsh-tui/dsh-peak-balance-history.json` (safe to delete — it rebuilds). While
+the scene is open it re-scans incrementally once a minute; closing it stops that.
 
 ## How the numbers are produced
 
@@ -124,10 +280,10 @@ only in the request header, and is never logged or stored by this plugin.
 
 | Item | Value |
 | --- | --- |
-| Host | `@deepseek-harness-tui/dsh-tui` 0.10.x (`ctx.tuiStatus.registerView`, `ctx.tuiSettingsSections.register`) |
+| Host | `@deepseek-harness-tui/dsh-tui` 0.10.x (`ctx.tuiStatus.registerView`, `ctx.tuiSettingsSections.register`, `ctx.tuiScenes.register/open`, `ctx.commands.register`, `ctx.tuiCommandTrees.register`, `ctx.tuiShortcuts.register`) |
 | Harness | `@deepseek-ai/dsh` 0.1.2-rc.1 or later (`session/event`, `settings`, `credentials`) |
-| Runtime | Node `^22.19 \|\| >=24`, pure ESM, no native dependencies |
-| Manifest | `manifestVersion` 0.15 · id `com.dsh-tui-ecosystem.dsh-peak-balance` |
+| Runtime | Node `^22.19 \|\| >=24`, pure ESM, no native dependencies (multi-frame zstd uses the built-in `node:zlib`) |
+| Manifest | `manifestVersion` 0.15 · id `com.dsh-tui-ecosystem.dsh-peak-balance` · contracts `tui.dsh/v1alpha1#DecisionEvents` (optional) and `commands.dsh/v1alpha1#Command` (required) · three command contributions (`/hist`, `/th`, `/tokenhistory`) |
 | Platform | Anywhere dsh-tui runs (Windows / macOS / Linux) |
 
 Every host seam is optional and probed softly (`ctx.get(name, false)`): without
@@ -135,6 +291,25 @@ the TUI extension services, without a credentials service, or without network
 access the plugin stays inert instead of failing the host. All registrations are
 retried for 30 s while the profile composes, and every timer is cleared from the
 activation's effect disposer.
+
+The commands prefer the **mediated** surface (`ctx.tuiPluginHost.registerCommand`,
+C-041 attribution plus the invoke checkpoint) and fall back to
+`ctx.commands.register` (the documented C-070 boundary) when the host refuses it.
+A third-party plugin loaded as a plain profile row has no verified component
+identity, so the fallback is the path that actually answers here; when both fail
+the plugin logs once and everything else keeps working. `alt+h` goes through
+`ctx.tuiShortcuts.register` (ctrl/alt required, reserved combos refused with a
+no-op disposer — `alt+h` collides with nothing).
+
+**Language.** The plugin renders in the language dsh-TUI is showing, resolved in
+the host's own order: `DSH_TUI_LANG` → the live `dsh-tui.lang` setting →
+`~/.dsh-tui/lang.json` → the OS locale (an absent locale keeps the historical
+`zh`, any other unsupported one falls back to `en`, matching dsh-TUI). A `/lang`
+switch repaints the status line and an open history scene immediately through the
+settings service's `settings/updated(ns, next, prev, source)` event; where that
+namespace is not served, a 1 s poll of the persisted file (guarded by an
+mtime/size stamp) picks the change up instead. `DSH_PEAK_BALANCE_LANG_FILE`
+overrides the file path for tests and diagnostics.
 
 ## Known limitations
 
@@ -145,7 +320,7 @@ activation's effect disposer.
 - Cost figures are estimates from provider-reported tokens; the platform bill
   is authoritative.
 - The rate card is embedded in the package. A price change on DeepSeek's side
-  requires a plugin update.
+  requires a plugin update; a model the card does not list needs `/hist price set`.
 - The balance endpoint needs a DeepSeek official API key. Other providers are
   detected and simply show no balance.
 - Rich status contributions share a six-row budget with other plugins; this one
@@ -157,6 +332,30 @@ activation's effect disposer.
   turn in this process yet (a conversation just started with `/new`), never
   another conversation's figure. Subagent sessions are ignored on purpose, so a
   delegated child never rewrites your turn cost.
+- **A bare `/th` + Enter is captured by the host's completion overlay** (see
+  "Why a bare /th + Enter switches the theme"): the plugin cannot move its own
+  entry to the front of that list. Use `/hist`, `/tokenhistory`, `alt+h`, or
+  `/th ` with a trailing space. A future skill starting with `hist` would capture
+  `/hist` the same way.
+- **The history covers only this machine's dsh usage.** Calls made elsewhere
+  (web chat, other clients, other machines) are not in these logs, and the
+  earliest covered day is whatever the local logs still hold.
+- **The first `/th` needs a few seconds** for the full scan (341 logs / ~80 MB
+  here ≈ 4–5 s) and shows progress while it runs; afterwards the incremental
+  cache answers in 20–30 ms.
+- **Mouse hover needs the full-screen (alternate screen) layout** — the profile
+  ships `fullscreen: true`. In inline mode the keyboard (`←/→/↑/↓`) selects days
+  and shows the same detail card.
+- Square shading uses quartiles of the non-zero days in the visible span, so a
+  value's color bucket can shift as history grows (GitHub behaves the same); the
+  legend always states the current maximum.
+- **A terminal that is too narrow trims weeks instead of shrinking squares.** The
+  title chip says `showing 27/53w`, and `←`/`→` scroll the window one column at a
+  time so the selection is never hidden. Too few rows degrade in priority order:
+  the model table, then the detail card's fields (models first, then hit-rate /
+  cost / tokens), then the totals row. Under 12 rows or 40 columns the scene
+  switches to a fallback list (one recent day per line plus a totals line) so
+  nothing ever overflows.
 
 ## Publishing and versioning
 
@@ -177,9 +376,42 @@ pnpm verify              # all four, in order
 
 The tests cover the peak-window maths at fixed instants, the rate card and
 bucket pricing, usage normalization, balance-payload parsing (including
-failures), the display model, the status component's element tree, and a full
+failures), the display model, the status component's element tree, a full
 `apply()` run against a stubbed Cordis context — including the paths where the
-host services are missing, refuse, or throw.
+host services are missing, refuse, or throw — and the whole history stack: day
+and week arithmetic, fork-seed cutting, the view model, the incremental scanner
+(multi-frame zstd, damaged and truncated frames, cache reuse), the custom-rate
+file, the `/th price` grammar and the scene's element tree.
+
+Host-integration probe (boots a throwaway profile headlessly and checks whether
+the host **accepts** the registrations — the layer unit tests cannot see):
+
+```sh
+node ../../tools/probe-plugin.mjs . --wait 15
+```
+
+The probe profile now mounts the `scenes`, `plugin-host`, `command-trees` and
+`extensions` (which carries `tuiShortcuts`) rows too, so the scene, the three
+commands and the `alt+h` shortcut are verified as well; a passing run logs
+`history scene registered`, three `command registered` lines,
+`command tree registered roots=3` and `shortcut registered alt+h`, and exits 0.
+
+### Verifying the history numbers
+
+The aggregation is pure and unit tested, but the *data* needs real logs. To
+double-check on the same machine:
+
+1. delete `~/.dsh-tui/dsh-peak-balance-history.json` so the next `/th` rescans
+   everything;
+2. fold the same bytes with an **independent implementation** (one that does not
+   import this package) and compare the per-day and per-model figures;
+3. remember the logs are **live files**: totals grow while the tool runs, so two
+   snapshots never match — only agreement on the same batch of bytes means
+   anything.
+
+That is how this release was checked: 341 logs, 116 `(model, day, tier)` buckets,
+**zero disagreements** between the two implementations, plus zero duplicate seq
+numbers, zero out-of-order seq numbers and zero malformed JSONL lines.
 
 ### Previewing the peak-hour warning
 
@@ -222,7 +454,7 @@ diagnostics, so a test run never reads a real marker.
 
 ## Notes for plugin authors
 
-Two host behaviours cost real debugging time here, and both are easy to hit:
+Host behaviours that cost real debugging time here, and are easy to hit:
 
 - **A Cordis entry must export only `name`, `Config` and `apply`.** Exporting
   helpers from the same module changes how the loader wraps the activation, and
@@ -235,9 +467,28 @@ Two host behaviours cost real debugging time here, and both are easy to hit:
   non-strict `ctx.get(name, false)` can hand back a shadow placeholder whose
   method calls the host refuses. Keep the non-strict form only as a fallback,
   and keep retrying — the seam rows may still be activating on the first tick.
+- **Mediated command registration needs a verified component identity**, which a
+  plain profile row never gets: `ctx.tuiPluginHost.registerCommand` throws
+  `the calling activation has no verified dsh-plugin.json Component identity`.
+  Declare `commands.dsh/v1alpha1#Command` and the contribution id honestly in the
+  manifest anyway, but be ready to fall back to `ctx.commands.register` — without
+  it the command silently disappears.
+- **A plugin command name must not be a prefix of a built-in command.** The
+  slash-completion overlay owns Enter while it is open and runs the HIGHLIGHTED
+  suggestion, and built-ins come first in the merged list — so `/th` loses Enter
+  to `/theme`. Pick a non-colliding name (`/hist`) or bind a shortcut
+  (`ctx.tuiShortcuts`; ctrl/alt required, reserved combos refused).
+- **Scene hooks must be called unconditionally and in a stable order.** A
+  well-meaning "only call `ui.useTheme` if it exists" changes the hook order and
+  real React throws an invalid-hook-call. Read the hooks out first (with
+  default-returning stubs) and call them every render.
+- **A full-screen scene must budget its own rows and columns.** In the alternate
+  screen an overflow does not get clipped — it pushes the whole frame. Ask "how
+  many rows are left" before drawing each section, and compute the columns you
+  can actually fit instead of hoping the host truncates.
 
 This plugin writes what it learned to `~/.dsh-tui/dsh-peak-balance.log`, which
-is how both were found; see *Diagnostics* above.
+is how these were found; see *Diagnostics* above.
 
 ## Listing
 

@@ -3,7 +3,7 @@
   "manifestVersion": "0.15",
   "id": "com.dsh-tui-ecosystem.dsh-peak-balance",
   "name": "dsh-peak-balance",
-  "version": "0.1.11",
+  "version": "0.3.2",
   "facets": {
     "host": {
       "entry": "lib/index.js",
@@ -17,13 +17,49 @@
         "kind": "DecisionEvents",
         "optional": true,
         "fallback": "Without the mediated session-switch notification the status line follows the host's focused-session marker (~/.dsh-tui/resume.txt), polled once a second; without a marker it keeps the most recent session event."
+      },
+      {
+        "apiVersion": "commands.dsh/v1alpha1",
+        "kind": "Command"
       }
     ]
   },
-  "permissions": [],
+  "permissions": [
+    {
+      "name": "commands.invoke",
+      "scope": "com.dsh-tui-ecosystem.dsh-peak-balance.hist",
+      "reason": "run /hist (the token-history grid, totals and per-model table)"
+    },
+    {
+      "name": "commands.invoke",
+      "scope": "com.dsh-tui-ecosystem.dsh-peak-balance.th",
+      "reason": "run /th (needs a trailing space; see the manifest description)"
+    },
+    {
+      "name": "commands.invoke",
+      "scope": "com.dsh-tui-ecosystem.dsh-peak-balance.tokenhistory",
+      "reason": "run /tokenhistory, the long alias of /hist"
+    }
+  ],
   "subscriptions": [],
   "contributes": {
-    "commands": []
+    "commands": [
+      {
+        "id": "com.dsh-tui-ecosystem.dsh-peak-balance.hist",
+        "title": "/hist",
+        "description": "Token history: daily usage/cost grid, grand totals and per-model stats"
+      },
+      {
+        "id": "com.dsh-tui-ecosystem.dsh-peak-balance.th",
+        "title": "/th",
+        "description": "Token history (keep the trailing space: a bare /th is captured by the completion menu)"
+      },
+      {
+        "id": "com.dsh-tui-ecosystem.dsh-peak-balance.tokenhistory",
+        "title": "/tokenhistory",
+        "description": "Token history (same as /hist)"
+      }
+    ]
   },
   "compat": {
     "hosts": [
