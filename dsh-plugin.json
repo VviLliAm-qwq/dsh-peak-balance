@@ -3,7 +3,7 @@
   "manifestVersion": "0.15",
   "id": "com.dsh-tui-ecosystem.dsh-peak-balance",
   "name": "dsh-peak-balance",
-  "version": "0.3.3",
+  "version": "0.5.0",
   "facets": {
     "host": {
       "entry": "lib/index.js",
@@ -39,6 +39,11 @@
       "name": "commands.invoke",
       "scope": "com.dsh-tui-ecosystem.dsh-peak-balance.tokenhistory",
       "reason": "run /tokenhistory, the long alias of /hist"
+    },
+    {
+      "name": "commands.invoke",
+      "scope": "com.dsh-tui-ecosystem.dsh-peak-balance.quota",
+      "reason": "run /quota (provider quota diagnostics: adapter, endpoint and last outcome)"
     }
   ],
   "subscriptions": [],
@@ -58,6 +63,11 @@
         "id": "com.dsh-tui-ecosystem.dsh-peak-balance.tokenhistory",
         "title": "/tokenhistory",
         "description": "Token history (same as /hist)"
+      },
+      {
+        "id": "com.dsh-tui-ecosystem.dsh-peak-balance.quota",
+        "title": "/quota",
+        "description": "Provider quota diagnostics: which adapter answers, from which endpoint, and why it last failed"
       }
     ]
   },

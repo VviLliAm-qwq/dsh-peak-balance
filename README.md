@@ -63,8 +63,9 @@ below) takes over the whole terminal with a GitHub-style contribution grid:
 | Feature | What it shows |
 | --- | --- |
 | Peak / off-peak clock | The billing window currently in force and a live countdown to the next price switch (`09:00-12:00` / `14:00-18:00` Beijing time, Monday–Friday; weekends are off-peak all day). |
-| Live balance | Your DeepSeek account balance, refreshed after **every completed turn** and once a minute in the background. |
-| Per-turn cost | What the turn that just finished cost, in CNY, priced from the official rate card — peak and off-peak usage are priced separately, by each request's own timestamp. The figure follows the conversation you are **focused on**, not the one that last appended an event. |
+| Account readout (provider-neutral) | The balance or plan quota of **the provider the focused conversation actually runs through**: an official balance, a subscription's 5-hour/weekly/monthly windows, a relay's credit pool. The provider comes from `request/header.config.provider` in the session log, and its base URL and credential reference are resolved through the harness seams. A provider with no readable interface is simply left off the line — no figure is ever guessed. |
+| Per-turn cost | What the turn that just finished cost. When the provider exposes a spend counter (Command Code credits, OpenRouter key usage, a relay's used quota) this is **measured** from that counter; otherwise it is estimated from a rate card, and otherwise the line says the model is unrated. The figure follows the conversation you are **focused on**, not the one that last appended an event. |
+| Quota diagnostics `/quota` | One command shows what is being read, which adapter answers, why the last read failed, and every provider route this process could ask about (`/quota check <provider>` probes one on the spot). |
 | Peak-hour warning | Optional. While peak pricing is active the status contribution becomes a rounded frame whose border, phase label and travelling waveform pulse in the chosen color. |
 | History grid `/th` | A full-screen scene: one square per day, shaded by that day's usage, with a hover card for the day under the pointer. Keyboard: `←/→` walks days, `↑/↓` walks weeks, `m` cycles the metric, `w` the span, `s` the subagent switch, `r` rescans, `q`/`Esc` returns to the conversation. |
 | Totals and per-model stats | Totals: tokens, estimated cost, cache-hit rate, active days, sessions, subagent share, busiest day. Model table: each model's total tokens, estimated cost, cache-hit rate and where its rates came from. |
@@ -110,10 +111,22 @@ Main card:
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| Show balance | boolean | `true` | Show the account balance on the status line. |
-| Show per-turn cost | boolean | `true` | Show what this turn has cost: a live estimate while the model answers, frozen when the turn closes. |
+| Show balance | boolean | `true` | Show the account section on the status line (a quota meter, or the legacy balance readout). |
+| Show per-turn cost | boolean | `true` | Show what this turn has cost: a live estimate while the model answers, frozen when the turn closes (measured from the provider's counter when it has one). |
 | Peak-hour warning | boolean | `false` | Turn the line into a pulsing frame while peak pricing is active. |
 | Warning color | select | `red` | Frame color: `red` `orange` `yellow` `green` `cyan` `blue` `purple`. |
+
+**Provider quota** subpage:
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| Quota provider | text | `auto` | `auto` follows the focused conversation's provider; a provider id (`commandcode`, `openrouter`, …) pins that one; `off` hides the account section. |
+| Quota metric | select | `auto` | `auto` (the tightest window), `balance`, `window5h`, `windowWeekly`, `windowDaily`, `windowMonthly`, `planRemaining`, `keyLimit`, `periodSpend`, or `rotate` (cycle every meter, one every 8 s). |
+| Turn spend | select | `auto` | `auto` (measured when the provider has a counter), `measured`, `estimate`. |
+| Unofficial endpoints | boolean | `false` | Allow quota reads from endpoints no provider documents publicly (mostly reverse-engineered console APIs). |
+| Provider spec file | text | empty | JSON file describing providers this build ships no adapter for; empty uses `~/.dsh-tui/dsh-peak-balance-providers.json`. |
+| Billing mode | select | `auto` | How the account readout is shaped: `auto` follows the provider's declaration (a subscription shows percentages, pay-as-you-go shows amounts), or force `money` / `plan`. |
+| Percentage base | select | `meter` | What a plan percentage divides by: `meter` uses the window the line is showing, `monthly` the whole monthly pool. |
 
 **Token history** subpage:
 
@@ -147,6 +160,9 @@ alt+h                                 # same thing without typing
 /hist price set <model> <hit> <miss> <out> [peakHit peakMiss peakOut]
 /hist price rm <model>
 /hist price clear
+/quota                                # quota diagnostics: source, adapter, meter, last failure
+/quota check <provider>               # probe one provider now (empty = the current target)
+/quota meter windowWeekly             # switch the status-line meter (same as the setting)
 ```
 
 ### Why a bare `/th` + Enter switches the theme
@@ -285,6 +301,116 @@ endpoint behind dsh-tui's `/balance` command). The key is resolved through the
 `credentials` seam (`DEEPSEEK_API_KEY`) with an environment fallback, is sent
 only in the request header, and is never logged or stored by this plugin.
 
+## Third-party providers
+
+Since 0.4.0 the account section is no longer DeepSeek-specific. The plugin
+resolves, in order, **which provider to ask**, **where it lives** and **how to
+ask it** — and degrades quietly at every step it cannot complete:
+
+1. **Provider** — the focused conversation's last `request/header.config.provider`
+   (in `auto` mode; the setting can pin one provider or turn the section off).
+2. **Endpoint and credential** — the provider's own settings section (pointed at
+   by `ctx.llm.listConfigurableProviders()`) → the spec file → the generated
+   catalog snapshot. The key is resolved through the `credentials` seam with an
+   environment fallback of the same name.
+3. **Adapter** — by provider id, then by base-URL host, then by spec. Nothing
+   matches → the section is left off the line (it only says `no API` when you
+   pinned that provider yourself).
+
+### Built-in adapters
+
+| Adapter | Providers | Meters | Verified against a real account |
+| --- | --- | --- | --- |
+| `deepseek-balance` | `deepseek-official` / `deepseek` | balance, in the reported currency | ✅ yes |
+| `commandcode-plan` | `commandcode` | 5-hour and weekly windows, monthly plan remainder, period spend | ✅ yes (a live GOAT plan) |
+| `openrouter` | `openrouter` | balance (credits − usage), key limit, daily/weekly/monthly usage | ⚠️ no — built from the official docs, tested with fixture payloads |
+| `moonshot-balance` | `moonshotai` / `moonshotai-cn` | balance (CNY on `.cn`, USD internationally) | ⚠️ no |
+| `siliconflow-balance` | `siliconflow` routes | balance (the API states no currency, so none is printed) | ⚠️ no |
+| `openai-billing` | gateways **declared in the composition** (One API, New API, self-hosted) | `soft/hard_limit_usd` balance plus `total_usage` (cents) | ⚠️ no |
+| `declared` | anything in the spec file | whatever the spec says | — |
+
+OpenRouter's `/credits` requires a **management key** (an ordinary key is refused
+with 403), so the adapter asks `/key` in parallel and still reports the key's
+limit and usage when only an ordinary key exists.
+
+### Plans read as percentages
+
+The shape of the account readout **follows the provider's billing method**: a
+pay-as-you-go account (a currency balance, debited per token) shows amounts,
+while a subscription (capped rolling windows over a monthly pool) shows
+**percentages** — how much of the cap is left, and what share of it the turn just
+drew. The order is: the `Billing mode` override, then the provider's own
+declaration (an adapter, or a spec stanza's `billing`), then the data (capped
+windows with no currency balance read as a plan). The inference is deliberately
+conservative: an unrecognized shape reads as money — absolute figures — rather
+than inventing a denominator.
+
+`Percentage base` picks the **denominator**: the window the status line is
+showing by default (the tightest limit — the one whose reset countdown is right
+there), or the whole monthly pool. Each falls back to the other, so a provider
+reporting only one of them still gets a usable divisor. **No cap, no
+percentage**: the figure falls back to absolute amounts.
+
+```
+🌊 off-peak · weekend · peak in 18h26m · turn 1.79%(0.2500) · plan GOAT · 5h 92.9% left(1.00/14.00) · resets in 1h00m
+```
+
+**A narrow terminal keeps the percentage and drops the rest.** Every part may
+carry a compact form (`turn 1.79%`); when the full line does not fit, the compact
+forms are swapped in from the right, which is where the host truncates first. The
+width comes from the host's terminal-size hook when there is one, then
+`process.stdout.columns`; with neither, the line renders in full exactly as
+before.
+
+Precision follows magnitude: two decimals below 10% (a subscription turn is often
+a fraction of a percent, where one decimal would look frozen), one at or above
+it, `<0.01%` for anything smaller, and `0%` for a true zero.
+
+### The spec file (providers with no adapter)
+
+`~/.dsh-tui/dsh-peak-balance-providers.json` (safe to delete; a broken file reads
+as an empty config):
+
+```jsonc
+{
+  "version": 1,
+  "apiBases": { "my-relay": "https://relay.example.com" },
+  "allowUnofficial": false,
+  "providers": {
+    "my-relay": {
+      "adapter": "declared",
+      "auth": { "kind": "bearer", "apiKeyEnv": "MY_RELAY_KEY" },
+      "requests": [
+        {
+          "path": "/api/user/self",
+          "headers": { "New-Api-User": "1" },
+          "meters": [
+            { "id": "balance", "kind": "money", "currency": "USD", "value": "data.quota", "scale": 0.000002 },
+            { "id": "periodSpend", "kind": "money", "currency": "USD", "used": "data.used_quota", "scale": 0.000002 }
+          ]
+        }
+      ],
+      "spendCounter": "data.used_quota",
+      "spendUnit": { "kind": "money", "currency": "USD" }
+    }
+  }
+}
+```
+
+Dot paths accept array indices (`data.0.results.0.amount`), `scale` converts
+units, and `resetAt` understands `ms` / `s` / `iso` / `remainingMs` /
+`remainingS`. **The New API / One API account endpoint authenticates with a web
+access token, not the `sk-` relay key**, so store one separately (the
+`MY_RELAY_KEY` above) and enable `allowUnofficial` — it is a console-side API.
+
+Other recipes that need no code, only a spec stanza:
+
+| Target | Fields that matter |
+| --- | --- |
+| Anthropic organization cost (admin key) | `GET /v1/organizations/cost_report`, amount at `data.0.results.0.amount`, unit is **cents** (`scale: 0.01`), currency USD |
+| MiniMax coding plan | `GET https://www.minimaxi.com/v1/api/openplatform/coding_plan/remains`, `model_remains.0.current_interval_usage_count` / `..._total_count`, reset via `remains_time` with `resetUnit: "remainingMs"` |
+| 智谱 balance | `GET https://open.bigmodel.cn/api/biz/account/query-customer-account-report`, `data.availableBalance` (CNY) |
+
 ## Compatibility
 
 | Item | Value |
@@ -330,8 +456,32 @@ overrides the file path for tests and diagnostics.
   is authoritative.
 - The rate card is embedded in the package. A price change on DeepSeek's side
   requires a plugin update; a model the card does not list needs `/hist price set`.
-- The balance endpoint needs a DeepSeek official API key. Other providers are
-  detected and simply show no balance.
+- The account section depends on the provider's own API: **a provider with no
+  public quota interface shows no figure at all** (OpenAI, Gemini, Anthropic
+  prepaid balance, the GLM/Kimi coding plans, Claude subscriptions), rather than
+  a guessed one. A spec stanza can cover your own deployment or an interface this
+  build does not ship.
+- **Only the DeepSeek official and Command Code adapters were verified against a
+  real account** (see the table above). The other named adapters are implemented
+  from each provider's own documentation and tested with fixture payloads drawn
+  from it; they have not been checked against a live account.
+- **Undocumented endpoints are opt-in** (`allowUnofficialQuota`), because they
+  can change without notice. Command Code's `/alpha/*` routes are exempt: they
+  are the ones the provider's own CLI drives.
+- **No Command Code price card is embedded.** Its model catalog carries no
+  prices and its pricing page is generated client-side, so an estimate would have
+  been invented; subscription models show tokens only until you set rates with
+  `/hist price set commandcode:<model> …`, while the per-turn figure stays the
+  provider's own measured number.
+- **`/hist` never adds two units together.** With providers of different
+  currencies selected at once (CNY next to credits) the `cost` metric falls back
+  to tokens, says so in the totals block, and lists a per-provider subtotal.
+- **The history cache is at version 2**, so the first `/hist` after upgrading
+  rebuilds it from the session logs (a few seconds on this machine; the scan
+  checkpoints as it goes).
+- **`/quota`'s provider list** merges the LLM seam's directory, the generated
+  catalog snapshot and the spec file; a route declared in the composition but not
+  currently routable may not appear.
 - **The balance is shown in the currency the endpoint reports.** The payload
   carries `currency` (`CNY`, `USD`, …), and the line uses the matching symbol
   (`¥`, `$`); an unknown currency falls back to its ISO code (`12.34 CHF`)

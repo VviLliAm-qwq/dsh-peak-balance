@@ -6,6 +6,147 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-13
+
+### Changed
+
+- **The kind of account readout follows the provider's billing method.** A
+  pay-as-you-go provider (a currency balance, debited per token) keeps showing
+  amounts; a subscription (capped rolling windows over a monthly pool) now shows
+  **percentages** — the status line reports how much of the cap is left and what
+  share of it the turn just drew, instead of a raw credit count. Which is which
+  is declared by each adapter (`commandcode-plan` is a plan, `deepseek-balance`
+  is money, a relay stays `auto` and is judged by its own figures), may be
+  declared per provider in the spec file, and can be overridden with the new
+  `Billing mode` setting. The inference is conservative: an unknown shape reads
+  as money, which renders absolute figures rather than an invented denominator.
+- **A percentage says what it is a percentage of.** `Percentage base` picks the
+  denominator: the window the line is showing (default — the tightest limit, the
+  one whose reset countdown is on screen) or the whole monthly pool. Each falls
+  back to the other, so a provider reporting only one of them still gets a
+  meaningful figure. A meter with no cap has no percentage, and falls back to
+  absolute amounts.
+- **Narrow terminals drop the absolute figures, not the percentage.** Every part
+  may carry a compact form (`本轮 1.79%` beside `本轮 1.79%(0.2500)`); when the
+  full line does not fit, the compact forms are swapped in from the right, which
+  is where the host truncates first. The width comes from the host's
+  terminal-size hook when the status-view kit offers one, and from
+  `process.stdout.columns` otherwise; with neither, the line renders in full
+  exactly as before.
+- Percentage precision follows magnitude: two decimals below 10% (a subscription
+  turn is often a fraction of a percent, where one decimal would look frozen),
+  one at or above it, `<0.01%` for anything smaller, and `0%` for a true zero.
+
+### Added
+
+- `Billing mode` and `Percentage base` settings fields, and a `billing` field
+  for spec-file providers.
+
+## [0.4.0] - 2026-09-13
+
+### Added
+
+- **A provider-neutral account readout.** The line above the prompt no longer
+  assumes DeepSeek's own balance endpoint: an adapter layer discovers the
+  provider the focused conversation actually runs through (from
+  `request/header.config.provider`), resolves its base URL and credential
+  reference through the harness seams — the LLM directory, a registered settings
+  namespace, the credentials seam — and renders whatever that provider reports
+  as a list of *meters* (`balance`, 5-hour/weekly/daily/monthly windows, plan
+  remainder, key limit, period spend). Built-in adapters ship for DeepSeek's
+  official balance, Command Code's subscription plan, OpenRouter, Moonshot/Kimi
+  and SiliconFlow, plus the OpenAI-compatible dashboard-billing pair that One
+  API and New API relays implement; anything else is described in a JSON spec
+  file instead of a release. Nothing is ever guessed: a provider with no known
+  interface is simply left off the line.
+- **Per-turn spend measured from the provider's own counter.** When an adapter
+  exposes a monotonic spend counter (Command Code's `usage.totalCredits`,
+  OpenRouter's `key.usage`, a relay's `total_usage`), a turn's spend is the
+  difference between two readings rather than a token-based estimate. A counter
+  that has not moved yet is retried for about 15 s and then settled as inexact
+  (`≈`); a counter that goes *backwards* is a new billing period, not a refund,
+  and re-baselines instead of printing a negative cost.
+- **`/quota` diagnostics.** Reports the resolved target, the adapter that
+  claimed it, the last outcome with its failure reason, every meter with its
+  figures, and every provider route this process could ask about (marked with `*`
+  when the host says the route exists only because configuration declared it).
+  `/quota check <provider>` probes one provider on the spot, and `/quota meter
+  <id>` switches the status-line meter.
+- **A generated provider catalog** (`scripts/gen-provider-catalog.mjs` →
+  `lib/providers/catalog.js`): 40 routes with their base URLs and conventional
+  credential references, taken from the locally installed
+  `@earendil-works/pi-ai` and stamped with its version. Runtime never depends on
+  pi-ai.
+- **A declarative provider spec file**
+  (`~/.dsh-tui/dsh-peak-balance-providers.json`): base URL, credential reference,
+  requests and dot-path meters, so a relay nobody shipped an adapter for becomes
+  usable without a code change. The README carries worked examples (One API
+  account endpoint, Anthropic cost report, MiniMax plan remains, 智谱 balance).
+- **Per-provider history.** Session logs already carry the provider route next to
+  the model; the board now folds usage into `provider/model` buckets, subtotals
+  per provider, prefixes the model column with its source once more than one
+  account is present, and offers a `p` key that cycles the filter. Custom rates
+  accept a provider-qualified key (`/hist price set commandcode:<model> …`),
+  which is what lets the same model be priced differently per account.
+- **The `rotate` meter**, which cycles every meter a provider reports, and
+  per-request failure notes on a partially answered provider.
+
+### Changed
+
+- **A cost total that mixes units is refused, not printed.** An official CNY
+  estimate and a subscription's credits are different currencies; when the
+  selection contains both, the `cost` grid metric falls back to tokens, the
+  totals say so, the totals block gains a per-provider breakdown, and the model
+  table keeps one row per (provider, model) pair.
+- **The account section follows the conversation, not the configuration.** With
+  `quotaProvider: auto` the section re-targets the moment a session event names a
+  different provider (throttled to one request every 3 s). The settings card
+  gains a **Provider quota** subpage with five fields: source, meter, turn-spend
+  mode, unofficial-endpoint opt-in and the spec-file path.
+- **The history cache moved to version 2** (bucket keys carry the provider), so
+  the first `/hist` after upgrading rebuilds it from the session logs.
+- **`Show balance` now gates the whole account section** — the quota meter and
+  the legacy balance readout alike.
+
+### Fixed
+
+- A provider whose adapter ships a canonical endpoint (the official API, Command
+  Code's own host) is no longer rejected as "no base URL known".
+- The account section no longer falls back to a legacy balance renderer with an
+  empty state, which printed `余额 暂不可用` for a provider that simply had
+  nothing to show.
+- A provider change is applied after the event has claimed the status line, so
+  the refresh targets the conversation that is actually on screen.
+
+### Notes
+
+- **Which adapters were verified against a real account:** DeepSeek official and
+  Command Code. Command Code's figures were read from a live account
+  (`/alpha/billing/credits` reported the 5-hour cap at 14, the weekly cap at 35
+  and ~70 monthly credits on a GOAT plan, matching the plan table and the
+  rendered meter), and `/alpha/usage/summary` supplied the spend counter. The
+  **measured per-turn difference** itself is covered end-to-end by an integration
+  test that drives a session through `turn/start` → `assistant/message` →
+  `turn/end` against a counter that moves the way a provider's does; confirming
+  it against a real turn on a live subscription is left to the account owner,
+  because this repository's own sessions run through the official provider. The
+  named third-party adapters are implemented from each provider's own
+  documentation and exercised against fixture payloads taken from it; the README
+  says so per adapter rather than implying otherwise.
+- **Undocumented endpoints are opt-in.** `allowUnofficialQuota` (off by default)
+  gates adapters built on endpoints no provider documents. Command Code's
+  `/alpha/*` routes are not gated: they are the ones the provider's own CLI
+  drives, the same source the ecosystem's provider plugin uses.
+- **No Command Code price card was added.** Its model catalog carries no prices
+  and its pricing page is generated client-side, so an estimate would have been
+  invented. Subscription models show tokens only until rates are set with
+  `/hist price set`, while the per-turn figure stays the provider's own measured
+  number.
+- **Deviation from the reviewed plan:** the three planned `/quota` commands were
+  implemented as one command with `status` / `check` / `meter` subcommands, which
+  keeps the manifest's contribution and permission surface at four ids instead of
+  six.
+
 ## [0.3.3] - 2026-09-12
 
 ### Performance

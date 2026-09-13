@@ -1,7 +1,7 @@
 {
   "name": "dsh-peak-balance",
-  "version": "0.3.3",
-  "description": "Peak/off-peak billing clock with live DeepSeek account balance, per-turn cost and a /hist token-history scene (daily usage/cost grid, grand totals, per-model stats, custom rates) for dsh-tui",
+  "version": "0.5.0",
+  "description": "Peak/off-peak billing clock with a provider-neutral account readout (DeepSeek balance, subscription plan windows, relay credits), per-turn spend measured from the provider's own counter, and a /hist token-history scene split per provider for dsh-tui",
   "license": "MIT",
   "packageManager": "pnpm@11.22.0",
   "type": "module",

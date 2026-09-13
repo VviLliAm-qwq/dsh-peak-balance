@@ -11,7 +11,9 @@ import {
   makeEntry,
   normalizeEntry,
   normalizeTier,
+  parseRateTarget,
   parseRates,
+  ratesKeyOf,
   ratesPath,
   readRates,
   serializeRates,
@@ -34,7 +36,39 @@ test('makeEntry doubles the off-peak price into the peak tier', () => {
     updatedAt: 111,
   })
   assert.equal(PEAK_MULTIPLIER, 2)
-  assert.equal(RATES_VERSION, 1)
+  assert.equal(RATES_VERSION, 2)
+})
+
+test('a provider-qualified key keeps the provider and strips only the model prefix', () => {
+  assert.deepEqual(parseRateTarget('commandcode:deepseek/deepseek-v4.1-flash'), {
+    provider: 'commandcode',
+    model: 'deepseek/deepseek-v4.1-flash',
+  })
+  assert.deepEqual(parseRateTarget('deepseek-flash'), { provider: '', model: 'deepseek-flash' })
+  assert.deepEqual(parseRateTarget(':x'), { provider: '', model: ':x' })
+  assert.deepEqual(parseRateTarget(''), { provider: '', model: '' })
+  // A model id may itself contain a colon; the split is on the FIRST one.
+  assert.deepEqual(parseRateTarget('commandcode:inclusionai/ling-3.0:sante'), {
+    provider: 'commandcode',
+    model: 'inclusionai/ling-3.0:sante',
+  })
+  assert.equal(ratesKeyOf('commandcode', 'deepseek/deepseek-v4.1-flash'), 'commandcode:deepseek-v4.1-flash')
+  assert.equal(ratesKeyOf('', 'deepseek/deepseek-flash'), 'deepseek-flash')
+})
+
+test('a version 1 document still reads, and a qualified key round-trips', () => {
+  const legacy = JSON.stringify({
+    version: 1,
+    rates: { 'deepseek/deepseek-flash': { idle: { inputHit: 1, inputMiss: 2, output: 3 }, updatedAt: 5 } },
+  })
+  const parsed = parseRates(legacy)
+  assert.deepEqual(Object.keys(parsed), ['deepseek-flash'])
+
+  const written = withRate({}, 'commandcode:deepseek/deepseek-v4.1-flash', { hit: 1, miss: 2, out: 3 }, 7)
+  assert.equal(written.model, 'commandcode:deepseek-v4.1-flash')
+  const reread = parseRates(serializeRates(written.rates, 7))
+  assert.deepEqual(Object.keys(reread), ['commandcode:deepseek-v4.1-flash'])
+  assert.equal(reread['commandcode:deepseek-v4.1-flash'].updatedAt, 7)
 })
 
 test('makeEntry keeps explicit peak prices', () => {

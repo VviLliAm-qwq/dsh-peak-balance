@@ -55,8 +55,9 @@ DeepSeek 峰谷计费时钟 · 实时余额 · 每轮花费 · `/hist` 历史用
 | 功能 | 说明 |
 | --- | --- |
 | 峰谷时钟 | 显示当前计价时段与切换到下一时段的倒计时（北京时间周一至周五 `09:00-12:00`、`14:00-18:00` 为高峰，周末全天谷时）。 |
-| 实时余额 | DeepSeek 账户余额，**每轮对话结束后自动刷新**，另有每分钟一次的后台刷新。 |
-| 每轮花费 | 刚结束那一轮对话的估算花费（人民币）；高峰与谷时的用量按各自请求发生的时刻分别计价。数字跟着你**当前聚焦的对话**走，而不是「最后一个往里写事件的对话」。 |
+| 账户读数（通用） | 按**当前对话实际使用的 provider** 显示余额或套餐额度：官方余额、订阅套餐的 5 小时/周/月窗口、中转站的额度与限额。provider 由会话日志的 `request/header.config.provider` 判定，base URL 与密钥引用经宿主接缝解析；没有可查接口的 provider 直接不显示，**绝不猜数字**。 |
+| 每轮花费 | 刚结束那一轮对话的花费：provider 有消费计数器时显示**实测扣减**（如 Command Code 的 credits、OpenRouter 的 key 用量、中转站的已用额度），否则按价目估算，都没有就显示「费率未知」。数字跟着你**当前聚焦的对话**走。 |
+| 额度诊断 `/quota` | 一条命令看清算的是什么、谁在应答、上次为什么失败，以及本进程能路由到的全部 provider（`/quota check <provider>` 现场探测）。 |
 | 峰时警告 | 可选。高峰时段生效时，状态行变成圆角边框，边框、时段标签与右侧波形按设定颜色脉动。 |
 | 历史方格图 `/hist` | 全屏场景：一天一格、按当天用量深浅着色，鼠标悬停出当日明细；键盘按**方格**挪动（`←/→` 前后一周、`↑/↓` 前后一天、`t` 回到今天），另有 `m` 指标、`w` 跨度、`s` 子代理、`r` 刷新、`q`/`Esc` 返回。 |
 | 总计与模型维度 | 总计：总 token、总花费（估）、缓存命中率、活跃天数、会话数、子代理占比、峰值日；模型表：每个模型的总用量、总花费、总缓存命中率与费率来源。 |
@@ -91,10 +92,22 @@ dsh plugin --profile dsh-tui add file:/到本仓库的绝对路径/dsh-peak-bala
 
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| Show balance / 显示余额 | boolean | `true` | 状态行是否显示账户余额。 |
-| Show per-turn cost / 显示每轮花费 | boolean | `true` | 是否显示当前这轮的花费：作答进行中显示实时估算，轮次结束后定格。 |
+| Show balance / 显示余额 | boolean | `true` | 状态行是否显示账户那一段（余额或套餐额度）。 |
+| Show per-turn cost / 显示每轮花费 | boolean | `true` | 是否显示当前这轮的花费：作答进行中显示实时估算，轮次结束后定格（provider 有计数器时显示实测扣减）。 |
 | Peak-hour warning / 峰时警告模式 | boolean | `false` | 高峰时段是否把状态行变成闪烁边框。 |
 | Warning color / 警告色系 | select | `red` | 边框颜色：红 `red`、橙 `orange`、黄 `yellow`、绿 `green`、青 `cyan`、蓝 `blue`、紫 `purple`。 |
+
+**Provider quota（第三方 provider 额度）** 子页：
+
+| 字段 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| Quota provider / 额度来源 | text | `auto` | `auto` 跟随聚焦对话的 provider；填 provider id（如 `commandcode`、`openrouter`）固定其中一个；`off` 隐藏账户那一段。 |
+| Quota metric / 额度口径 | select | `auto` | `auto`（最紧的窗口）、`balance`、`window5h`、`windowWeekly`、`windowDaily`、`windowMonthly`、`planRemaining`、`keyLimit`、`periodSpend`、`rotate`（轮换，每 8 秒换一个口径）。 |
+| Turn spend / 每轮花费口径 | select | `auto` | `auto`（有计数器就实测）、`measured`、`estimate`。 |
+| Unofficial endpoints / 允许非公开端点 | boolean | `false` | 是否允许读取厂商未公开文档的额度端点（多为逆向控制台接口）。 |
+| Provider spec file / provider 声明文件 | text | 空 | 描述本包未内置适配器的 provider 的 JSON 文件；留空用 `~/.dsh-tui/dsh-peak-balance-providers.json`。 |
+| Billing mode / 计费方式 | select | `auto` | 账户读数的形态：`auto` 按 provider 的声明（订阅=百分比、按量=金额），也可强制 `money`（金额）或 `plan`（百分比）。 |
+| Percentage base / 百分比基数 | select | `meter` | 套餐百分比的分母：`meter` 用状态行当前显示的那个窗口，`monthly` 用整个月度额度。 |
 
 **Token history（历史用量）** 子页：
 
@@ -124,6 +137,9 @@ alt+h                                 # 同上（不用打字；聊天状态下�
 /hist price set <model> <hit> <miss> <out> [peakHit peakMiss peakOut]
 /hist price rm <model>
 /hist price clear
+/quota                                # 额度诊断：来源、适配器、口径与上次失败原因
+/quota check <provider>               # 现场探测一个 provider（provider 省略则用当前目标）
+/quota meter windowWeekly             # 切换状态行口径（等于改设置）
 ```
 
 ### 为什么 `/th` 单独回车会去切主题
@@ -165,7 +181,7 @@ alt+h                                 # 同上（不用打字；聊天状态下�
 
 **子代理**默认计入（它们花的是真钱），表里可分辨，也可以关掉。
 
-**未收录模型**（内置价目表没有的）只显示 token，金额显示「—」，等你在 `/hist price set` 里给定单价后才参与计价。自定义费率立即写入 `~/.dsh-tui/dsh-peak-balance-rates.json`，并同时影响历史看板与状态行的每轮花费。`<hit> <miss> <out>` 是**空闲时段**的三个单价（元/百万 tokens），高峰时段默认按官方规则取两倍；要给高峰单独定价时再补三个数字。
+**未收录模型**（内置价目表没有的）只显示 token，金额显示「—」，等你在 `/hist price set` 里给定单价后才参与计价。自定义费率立即写入 `~/.dsh-tui/dsh-peak-balance-rates.json`，并同时影响历史看板与状态行的每轮花费。`<hit> <miss> <out>` 是**空闲时段**的三个单价（元/百万 tokens），高峰时段默认按官方规则取两倍；要给高峰单独定价时再补三个数字。模型名可以写成 `provider:model`（如 `commandcode:deepseek/deepseek-v4.1-flash`），这样同一个模型在不同账户下可以有不同单价；不带前缀的写法始终有效。
 
 **准确性的两个实现细节**（都能在真实日志上复现）：
 
@@ -190,6 +206,82 @@ alt+h                                 # 同上（不用打字；聊天状态下�
 
 **余额**：`GET https://api.deepseek.com/user/balance`（与 dsh-tui 内置 `/balance` 同一只读接口）。密钥经 `credentials` 接缝读取 `DEEPSEEK_API_KEY`（可回退环境变量），仅放入请求头，不写日志、不落盘。
 
+## 第三方 provider 额度
+
+0.4.0 起，账户那一段不再写死 DeepSeek。插件按下面的顺序决定「问谁、怎么问」，任何一步拿不到就静默降级：
+
+1. **provider** —— 当前聚焦对话最近一次 `request/header.config.provider`（`auto` 模式；也可用设置固定或关掉）。
+2. **端点与密钥** —— provider 自己的设置段（`ctx.llm.listConfigurableProviders()` 给出的命名空间指针）→ 声明文件 → 内置目录快照。密钥经 `credentials` 接缝解析，失败回落同名环境变量。
+3. **适配器** —— 按下表选择；都不匹配就显示「无接口」（只有你显式指定了该 provider 时才显示这一行）。
+
+### 内置适配器
+
+| 适配器 | 覆盖的 provider | 口径 | 是否经真实账户核对 |
+| --- | --- | --- | --- |
+| `deepseek-balance` | `deepseek-official` / `deepseek` | 余额（按接口回报的币种） | ✅ 是 |
+| `commandcode-plan` | `commandcode` | 5 小时 / 周窗口、月度套餐余量、本期消费 | ✅ 是（GOAT 套餐实测） |
+| `openrouter` | `openrouter` | 余额（credits − usage）、key 限额、日/周/月用量 | ⚠️ 未核对（按官方文档实现，夹具测试） |
+| `moonshot-balance` | `moonshotai` / `moonshotai-cn` | 余额（`.cn` 为 CNY，国际站为 USD） | ⚠️ 未核对 |
+| `siliconflow-balance` | `siliconflow` 路由 | 余额（接口未标注币种，按原值显示） | ⚠️ 未核对 |
+| `openai-billing` | 组合里**声明**的网关/自建路由（One API、New API 等） | `soft/hard_limit_usd` 余额 + `total_usage`（美分） | ⚠️ 未核对 |
+| `declared` | 声明文件里的任意 provider | 由声明决定 | — |
+
+OpenRouter 的 `/credits` 需要**管理密钥**（普通 key 会 403）；插件会同时请求 `/key`，因此只有普通 key 时仍然显示 key 限额与用量。
+
+### 套餐按百分比显示
+
+账户那一段的**形态跟着 provider 的计费方式走**：按量计费（有货币余额、按 token 扣钱）显示金额；订阅套餐（带上限的滚动窗口 + 月度池）显示**百分比** —— 状态行给出「还剩多少」，以及「本轮用掉了这个窗口的百分之几」。判定顺序是：设置项 `Billing mode` 的强制值 → provider 自己的声明（适配器或声明文件里的 `billing`）→ 按数据推断（有上限窗口且无货币余额即视为套餐）。推断刻意保守：形状不认识的按金额显示，而不是凭空造一个分母。
+
+百分比的**分母**由 `Percentage base` 决定：默认是状态行当前显示的那个窗口（最紧的限额，重置倒计时也在那一行），也可以改成整个月度额度；两边互相兜底，所以只报其中一种的 provider 也有可用的分母。**没有上限就没有百分比**，此时如实退回绝对数值。
+
+```
+🌊 谷时·半价 · 周末 · 距峰时 18h26m · 本轮 1.79%(0.2500) · 套餐 GOAT · 5h 剩 92.9%(1.00/14.00) · 距重置 1h00m
+```
+
+**窄终端只显示百分比**：每个片段都带一个紧凑写法（`本轮 1.79%`），整行放不下时从右侧开始逐个换成紧凑写法（宿主正是先截尾）。宽度优先取宿主的终端尺寸钩子，没有就用 `process.stdout.columns`；两者都没有时按完整写法渲染，与旧版本一致。
+
+百分比精度随量级变化：小于 10% 给两位小数（订阅的一轮常常不到 1%，一位小数会看起来不动），10% 及以上一位小数，更小的显示 `<0.01%`，真正的零显示 `0%`。
+
+### 声明文件（未内置的 provider）
+
+`~/.dsh-tui/dsh-peak-balance-providers.json`（可安全删除；坏了就当作空配置）：
+
+```jsonc
+{
+  "version": 1,
+  "apiBases": { "my-relay": "https://relay.example.com" },
+  "allowUnofficial": false,
+  "providers": {
+    "my-relay": {
+      "adapter": "declared",
+      "auth": { "kind": "bearer", "apiKeyEnv": "MY_RELAY_KEY" },
+      "requests": [
+        {
+          "path": "/api/user/self",
+          "headers": { "New-Api-User": "1" },
+          "meters": [
+            { "id": "balance", "kind": "money", "currency": "USD", "value": "data.quota", "scale": 0.000002 },
+            { "id": "periodSpend", "kind": "money", "currency": "USD", "used": "data.used_quota", "scale": 0.000002 }
+          ]
+        }
+      ],
+      "spendCounter": "data.used_quota",
+      "spendUnit": { "kind": "money", "currency": "USD" }
+    }
+  }
+}
+```
+
+点路径支持数组下标（`data.0.results.0.amount`）；`scale` 用来做单位换算；`resetAt` 支持 `ms` / `s` / `iso` / `remainingMs` / `remainingS`。**New API / One API 的账户接口用的是网页 access token，而不是 `sk-` 中转 key**，所以要在凭据库里另存一份（上例的 `MY_RELAY_KEY`），并给 `allowUnofficial` 或全局的「允许非公开端点」开关打开——那是控制台侧接口。
+
+其他常见写法（同样用声明文件即可，不必改代码）：
+
+| 目标 | 关键字段 |
+| --- | --- |
+| Anthropic 组织级成本（需 admin key） | `GET /v1/organizations/cost_report`，金额路径 `data.0.results.0.amount`，单位是**分**（`scale: 0.01`），币种 USD |
+| MiniMax 编程套餐 | `GET https://www.minimaxi.com/v1/api/openplatform/coding_plan/remains`，`model_remains.0.current_interval_usage_count` / `..._total_count`，重置 `remains_time` 用 `resetUnit: "remainingMs"` |
+| 智谱余额 | `GET https://open.bigmodel.cn/api/biz/account/query-customer-account-report`，`data.availableBalance`（CNY） |
+
 ## 兼容性
 
 | 项 | 值 |
@@ -213,7 +305,13 @@ alt+h                                 # 同上（不用打字；聊天状态下�
 - **输入框边框本身无法由插件改色**：dsh-tui 0.10 的输入框边框由其内部 `EffortInputBorder` 组件独占渲染，没有对插件开放的接缝。因此警告边框是渲染在对话栏正上方的状态贡献——这是不改宿主源码能做到的最接近效果。
 - 花费为基于 token 用量的估算，实际扣费以 DeepSeek 平台账单为准。
 - 价目表内置在包内，官方调价需要插件更新；未收录的模型需要你自己用 `/hist price set` 补单价。
-- 余额接口需要 DeepSeek 官方 API key；其他 provider 会直接不显示余额。
+- 账户那一段依赖 provider 自己的接口：**没有公开额度接口的 provider 不会显示任何数字**（OpenAI、Gemini、Anthropic 预付费余额、GLM/Kimi 编程套餐、Claude 订阅等），而不是显示一个猜出来的值。可以用声明文件接入自家部署或未内置的接口。
+- **只有 DeepSeek 官方与 Command Code 两个适配器经过真实账户核对**（见上文表格）；其余具名适配器按各自官方文档实现，并用文档/源码里的夹具 payload 测试，未经真实账户核对。
+- **非公开端点默认关闭**：`allowUnofficialQuota` 打开后才允许访问厂商未公开文档的端点（如逆向的控制台接口）。Command Code 的 `/alpha/*` 不受该开关限制——那是官方 CLI 自己走的端点。
+- **不内置 Command Code 的价目表**：它的模型目录不带价格、价格页是前端渲染的，编一份出来就是猜。订阅套餐里的模型在 `/hist` 只显示 token，直到你用 `/hist price set commandcode:<model> …` 给出单价；状态行的「本轮」仍然是实测扣减。
+- **`/hist` 的总额不跨计价单位相加**：选中多个 provider 且计价单位不同（CNY 与 credits）时，`cost` 口径会退回 token 并注明，合计区按 provider 分列。
+- **历史缓存升到 v2**：升级后的第一次 `/hist` 会重建缓存（本机约 4~5 秒，边扫边落盘）。
+- **`/quota` 的 provider 列表**来自 `ctx.llm.listConfigurableProviders()`、内置目录快照与声明文件；组合里声明但宿主当前不可路由的 provider 可能不在列表里。
 - **余额按接口回报的币种显示**：接口在 `currency` 里给出币种（`CNY` / `USD` …），状态行使用对应符号（`¥` / `$`）；未知币种回退成 ISO 代码（如 `12.34 CHF`），不会把美元当人民币显示。
 - 富状态视图与其他插件共享 6 行预算，本插件占用 3 行，且仅在警告边框显示时占用。
 - 状态行显示的是**宿主当前聚焦的那个对话**：切换对话后它跟着切。已结算的轮次按**对话**记录（不是按会话对象），所以切走再切回来仍然能看到那个对话自己的上一轮花费；只有该对话在本进程内确实还没有已结算的轮次时才显示 `本轮 —`（新开的 `/new` 会话就是这种情况），而不是拿别的对话的数字顶上。

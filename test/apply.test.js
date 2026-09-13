@@ -29,6 +29,13 @@ const EXPECTED_DEFAULTS = {
   historyHoverCost: true,
   historyHoverCacheHit: true,
   historyHoverModels: true,
+  quotaProvider: 'auto',
+  quotaMetric: 'auto',
+  turnSpendMode: 'auto',
+  allowUnofficialQuota: false,
+  quotaProvidersFile: '',
+  billingMode: 'auto',
+  planPercentBase: 'meter',
 }
 
 test('sanitizeConfig accepts only known keys and types', () => {
@@ -39,6 +46,33 @@ test('sanitizeConfig accepts only known keys and types', () => {
     { ...EXPECTED_DEFAULTS, showBalance: false, warnOnPeak: true, warnColor: 'purple' },
   )
   assert.equal(sanitizeConfig({ warnColor: 'chartreuse' }).warnColor, 'red')
+})
+
+test('sanitizeConfig filters the quota knobs and clamps the free strings', () => {
+  assert.deepEqual(
+    sanitizeConfig({
+      quotaProvider: '  commandcode  ',
+      quotaMetric: 'windowWeekly',
+      turnSpendMode: 'measured',
+      allowUnofficialQuota: true,
+      quotaProvidersFile: '  /tmp/providers.json  ',
+    }),
+    {
+      ...EXPECTED_DEFAULTS,
+      quotaProvider: 'commandcode',
+      quotaMetric: 'windowWeekly',
+      turnSpendMode: 'measured',
+      allowUnofficialQuota: true,
+      quotaProvidersFile: '/tmp/providers.json',
+    },
+  )
+  // A stale or hostile value falls back to the default rather than reaching the
+  // display, and a runaway path is clamped.
+  const stale = sanitizeConfig({ quotaProvider: 42, quotaMetric: 'calories', turnSpendMode: 'guess', quotaProvidersFile: 'x'.repeat(900) })
+  assert.equal(stale.quotaProvider, 'auto')
+  assert.equal(stale.quotaMetric, 'auto')
+  assert.equal(stale.turnSpendMode, 'auto')
+  assert.equal(stale.quotaProvidersFile.length, 512)
 })
 
 test('sanitizeConfig filters the history selects and booleans', () => {
@@ -157,7 +191,7 @@ test('balanceStateOf maps every documented failure to a display state', () => {
   assert.deepEqual(balanceStateOf(undefined), { state: 'error' })
 })
 
-test('the settings card declares the four switches plus the history group', () => {
+test('the settings card declares the four switches plus the history and quota groups', () => {
   const section = settingsSection()
   assert.equal(section.ns, SETTINGS_NS)
   assert.deepEqual(
@@ -177,10 +211,18 @@ test('the settings card declares the four switches plus the history group', () =
       'historyHoverCost',
       'historyHoverCacheHit',
       'historyHoverModels',
+      'quotaProvider',
+      'quotaMetric',
+      'turnSpendMode',
+      'allowUnofficialQuota',
+      'quotaProvidersFile',
+      'billingMode',
+      'planPercentBase',
     ],
   )
   assert.deepEqual(section.groups, [
     { id: 'history', title: 'Token history', descriptions: { zh: '历史用量（/th）', en: 'Token history (/th)' } },
+    { id: 'quota', title: 'Provider quota', descriptions: { zh: '第三方 provider 额度', en: 'Provider quota' } },
   ])
   const color = section.fields.find(field => field.path[0] === 'warnColor')
   assert.equal(color.kind, 'select')
@@ -190,7 +232,23 @@ test('the settings card declares the four switches plus the history group', () =
   assert.deepEqual(layout.options.map(option => option.value), ['card', 'plain'])
   const grouped = section.fields.filter(field => field.group === 'history')
   assert.equal(grouped.length, 10)
+  assert.equal(section.fields.filter(field => field.group === 'quota').length, 7)
   assert.equal(section.fields.filter(field => field.group === undefined).length, 4)
+  const metric = section.fields.find(field => field.path[0] === 'quotaMetric')
+  assert.deepEqual(metric.options.map(option => option.value), [
+    'auto',
+    'balance',
+    'window5h',
+    'windowWeekly',
+    'windowDaily',
+    'windowMonthly',
+    'planRemaining',
+    'keyLimit',
+    'periodSpend',
+    'rotate',
+  ])
+  const spend = section.fields.find(field => field.path[0] === 'turnSpendMode')
+  assert.deepEqual(spend.options.map(option => option.value), ['auto', 'measured', 'estimate'])
   for (const field of section.fields) {
     assert.equal(typeof field.label, 'string')
     assert.equal(typeof field.descriptions.zh, 'string')
@@ -294,7 +352,7 @@ test('every seam is registered once, with the documented shape', () => {
     assert.equal(typeof ctx.__record.settings[0].schema, 'function')
 
     assert.equal(ctx.__record.sections.length, 1)
-    assert.equal(ctx.__record.sections[0].fields.length, 14)
+    assert.equal(ctx.__record.sections[0].fields.length, 21)
 
     assert.equal(ctx.__record.views.length, 1)
     const view = ctx.__record.views[0]
@@ -306,7 +364,7 @@ test('every seam is registered once, with the documented shape', () => {
     // mediated surface refuses an unadmitted activation), the scene is
     // registered once, and the `alt+h` shortcut exists because a bare `/th`
     // cannot survive the host's completion overlay.
-    assert.deepEqual(ctx.__record.commands.map(command => command.name), ['th', 'tokenhistory', 'hist'])
+    assert.deepEqual(ctx.__record.commands.map(command => command.name), ['th', 'tokenhistory', 'hist', 'quota'])
     for (const command of ctx.__record.commands) {
       assert.equal(typeof command.handler, 'function')
       assert.equal(typeof command.description, 'string')
@@ -380,11 +438,12 @@ test('the mediated command surface is preferred and a refusal falls back to the 
     ctx.get = (name) => services[name]
     apply(ctx, undefined)
 
-    assert.deepEqual(mediated.map(entry => entry.name), ['th', 'tokenhistory', 'hist'])
+    assert.deepEqual(mediated.map(entry => entry.name), ['th', 'tokenhistory', 'hist', 'quota'])
     assert.deepEqual(mediated.map(entry => entry.contributionId), [
       'com.dsh-tui-ecosystem.dsh-peak-balance.th',
       'com.dsh-tui-ecosystem.dsh-peak-balance.tokenhistory',
       'com.dsh-tui-ecosystem.dsh-peak-balance.hist',
+      'com.dsh-tui-ecosystem.dsh-peak-balance.quota',
     ])
     assert.equal(ctx.__record.commands.length, 0)
     ctx.__dispose()
@@ -405,7 +464,7 @@ test('a host that refuses the mediated surface still gets every command', () => 
     ctx.get = (name) => services[name]
     apply(ctx, undefined)
     // The unadmitted-activation refusal is expected and must not be a warning.
-    assert.deepEqual(ctx.__record.commands.map(command => command.name), ['th', 'tokenhistory', 'hist'])
+    assert.deepEqual(ctx.__record.commands.map(command => command.name), ['th', 'tokenhistory', 'hist', 'quota'])
     assert.equal(
       ctx.__record.logs.some(([, message]) => /no verified dsh-plugin.json/.test(message)),
       false,
@@ -449,7 +508,7 @@ test('/th opens the scene, and /th price manages custom rates', async () => {
         const file = join(stateDir, 'dsh-peak-balance-rates.json')
         assert.equal(existsSync(file), true)
         const stored = JSON.parse(readFileSync(file, 'utf8'))
-        assert.equal(stored.version, 1)
+        assert.equal(stored.version, 2)
         assert.deepEqual(stored.rates['deepseek-v4.1-flash-expires-on-0910'].idle, {
           inputHit: 0.02,
           inputMiss: 1,
@@ -847,26 +906,26 @@ test('the language follows the host: startup value, live switch, and the file fa
         ctx.__record.settingsValues = { 'dsh-tui': { lang: 'en' } }
 
         apply(ctx, undefined)
-        assert.match(renderLine(ctx), /Balance/)
+        assert.match(renderLine(ctx), /Quota/)
         assert.equal(ctx.__record.logs.some(([, message]) => /lang=en/.test(message)), true)
 
         // A live `/lang` lands as a settings commit for the `dsh-tui` namespace.
         ctx.__emit('settings/updated', 'dsh-tui', { lang: 'zh' }, { lang: 'en' }, 'user')
-        assert.match(renderLine(ctx), /余额/)
+        assert.match(renderLine(ctx), /额度/)
         assert.equal(ctx.__record.logs.some(([, message]) => /language switched en -> zh \(settings\/updated\)/.test(message)), true)
 
         // Unrelated namespaces and unusable values change nothing.
         ctx.__emit('settings/updated', 'chime', { doneFocus: 'g2' }, {}, 'user')
         ctx.__emit('settings/updated', 'dsh-tui', { lang: 'fr' }, {}, 'user')
         ctx.__emit('settings/updated', 'dsh-tui', undefined, {}, 'user')
-        assert.match(renderLine(ctx), /余额/)
+        assert.match(renderLine(ctx), /额度/)
 
         // The 1 s poll catches a host that writes only the preference file.
         services.get = () => undefined
         ctx.__record.settingsValues = undefined
         writeFileSync(langFile, JSON.stringify({ lang: 'en' }))
         await new Promise(resolve => setTimeout(resolve, 1500))
-        assert.match(renderLine(ctx), /Balance/)
+        assert.match(renderLine(ctx), /Quota/)
         ctx.__dispose()
       },
     )
@@ -893,7 +952,7 @@ test('the environment pin outranks the host setting', () => {
       apply(ctx, undefined)
       // dsh-tui pins `DSH_TUI_LANG` the same way, so the plugin must not let
       // the namespace override it.
-      assert.match(renderLine(ctx), /余额/)
+      assert.match(renderLine(ctx), /额度/)
       ctx.__dispose()
     },
   )
@@ -906,7 +965,7 @@ test('a host without a settings namespace still follows the persisted file', () 
     ctx.get = (name) => (name === 'settings' ? undefined : services[name])
     apply(ctx, undefined)
     // No namespace, no file (ABSENT_LANG_FILE), locale zh → Chinese.
-    assert.match(renderLine(ctx), /余额/)
+    assert.match(renderLine(ctx), /额度/)
     assert.doesNotThrow(() => ctx.__dispose())
   })
 })

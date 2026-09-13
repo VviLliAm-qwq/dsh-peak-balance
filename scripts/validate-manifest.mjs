@@ -109,15 +109,17 @@ for (const expected of ['tui.dsh/v1alpha1#DecisionEvents', 'commands.dsh/v1alpha
 }
 if (coordinates.length !== new Set(coordinates).size) fail('requires.contracts must not repeat a coordinate')
 
-// D. Contributions — exactly the three command roots the wiring registers, and
-// one `commands.invoke` grant per declared id (that permission is scoped to a
-// single contribution id by the catalogue). `/hist` is the reliable short name;
-// `/th` is kept for the owner's muscle memory (a bare `/th` is captured by the
-// host's completion overlay, which is why the description says so).
+// D. Contributions — exactly the command roots the wiring registers, and one
+// `commands.invoke` grant per declared id (that permission is scoped to a single
+// contribution id by the catalogue). `/hist` is the reliable short name; `/th`
+// is kept for the owner's muscle memory (a bare `/th` is captured by the host's
+// completion overlay, which is why the description says so). `/quota` reports
+// which provider adapter answers and why it last failed.
 const COMMAND_IDS = [
   'com.dsh-tui-ecosystem.dsh-peak-balance.hist',
   'com.dsh-tui-ecosystem.dsh-peak-balance.th',
   'com.dsh-tui-ecosystem.dsh-peak-balance.tokenhistory',
+  'com.dsh-tui-ecosystem.dsh-peak-balance.quota',
 ]
 const contributions = manifest.contributes?.commands
 if (!Array.isArray(contributions)) fail('contributes.commands must be an array')
