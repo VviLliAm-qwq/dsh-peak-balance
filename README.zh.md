@@ -377,7 +377,7 @@ DSH_PEAK_BALANCE_FORCE_PEAK=1 dsh --profile dsh-tui   # PowerShell: $env:DSH_PEA
 
 ## 发布与版本
 
-仓库 `VviLliAm-qwq/dsh-peak-balance`，MIT 许可。版本遵循 SemVer；npm 的 `version` 与 manifest 的 `version` 始终保持一致，打一个与该版本同号的 `v*` tag 即触发发布工作流。
+仓库 [VviLliAm-qwq/dsh-peak-balance](https://github.com/VviLliAm-qwq/dsh-peak-balance)，MIT 许可。版本遵循 SemVer；npm 的 `version` 与 manifest 的 `version` 始终保持一致，打一个与该版本同号的 `v*` tag 即触发发布工作流。
 
 ## 收录
 

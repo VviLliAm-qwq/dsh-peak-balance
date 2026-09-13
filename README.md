@@ -544,7 +544,8 @@ overrides the file path for tests and diagnostics.
 
 ## Publishing and versioning
 
-Released from `VviLliAm-qwq/dsh-peak-balance` under MIT. Versions follow
+Released from [VviLliAm-qwq/dsh-peak-balance](https://github.com/VviLliAm-qwq/dsh-peak-balance)
+under MIT. Versions follow
 SemVer; the npm `version` and the manifest `version` are kept identical, and a
 `v*` tag matching the version drives the release workflow.
 
