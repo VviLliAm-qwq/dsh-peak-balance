@@ -1,5 +1,7 @@
 # dsh-peak-balance
 
+[![ci](https://github.com/VviLliAm-qwq/dsh-peak-balance/actions/workflows/ci.yml/badge.svg)](https://github.com/VviLliAm-qwq/dsh-peak-balance/actions/workflows/ci.yml)
+
 **English** · [中文](README.zh.md)
 
 Peak/off-peak billing clock, live DeepSeek account balance, per-turn cost and a
@@ -547,7 +549,9 @@ overrides the file path for tests and diagnostics.
 Released from [VviLliAm-qwq/dsh-peak-balance](https://github.com/VviLliAm-qwq/dsh-peak-balance)
 under MIT. Versions follow
 SemVer; the npm `version` and the manifest `version` are kept identical, and a
-`v*` tag matching the version drives the release workflow.
+`v*` tag matching the version drives the release workflow. That workflow
+publishes through npm trusted publishing (OIDC), so the repository stores no
+token.
 
 ## Development
 

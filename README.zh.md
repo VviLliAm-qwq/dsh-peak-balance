@@ -1,5 +1,7 @@
 # dsh-peak-balance
 
+[![ci](https://github.com/VviLliAm-qwq/dsh-peak-balance/actions/workflows/ci.yml/badge.svg)](https://github.com/VviLliAm-qwq/dsh-peak-balance/actions/workflows/ci.yml)
+
 **中文** · [English](README.md)
 
 DeepSeek 峰谷计费时钟 · 实时余额 · 每轮花费 · `/hist` 历史用量方格图，显示在 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 里。
@@ -377,7 +379,7 @@ DSH_PEAK_BALANCE_FORCE_PEAK=1 dsh --profile dsh-tui   # PowerShell: $env:DSH_PEA
 
 ## 发布与版本
 
-仓库 [VviLliAm-qwq/dsh-peak-balance](https://github.com/VviLliAm-qwq/dsh-peak-balance)，MIT 许可。版本遵循 SemVer；npm 的 `version` 与 manifest 的 `version` 始终保持一致，打一个与该版本同号的 `v*` tag 即触发发布工作流。
+仓库 [VviLliAm-qwq/dsh-peak-balance](https://github.com/VviLliAm-qwq/dsh-peak-balance)，MIT 许可。版本遵循 SemVer；npm 的 `version` 与 manifest 的 `version` 始终保持一致，打一个与该版本同号的 `v*` tag 即触发发布工作流；该工作流经 npm **可信发布（OIDC）**上传，仓库内不存放令牌。
 
 ## 收录
 
