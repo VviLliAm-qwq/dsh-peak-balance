@@ -30,17 +30,30 @@ test('a body that dies mid-read while the request was aborted is a network failu
   // The timeout aborts the same controller that owns the body stream, so a
   // rejection during `json()` after the abort is the transport failing — not
   // the endpoint answering with nonsense.
-  const result = await fetchJson('https://relay.example.com/v1/dashboard/billing/usage', {
-    timeoutMs: 5,
-    fetchImpl: async (url, init) => ({
-      ok: true,
-      status: 200,
-      json: () => new Promise((resolve, reject) => {
-        init.signal.addEventListener('abort', () => reject(new Error('aborted')))
+  //
+  // `fetchJson` deliberately `unref()`s its timeout, so nothing in this test
+  // holds the event loop open. On Node 22 the runner then declares the loop
+  // resolved and cancels the test before the 5 ms abort can fire ("Promise
+  // resolution is still pending but the event loop has already resolved"); the
+  // Node 24 runner is forgiving, which is why this only ever failed on the
+  // lowest supported line. Holding the loop with a ref'd interval keeps the
+  // assertion about the classification instead of the runner's bookkeeping.
+  const keepAlive = setInterval(() => {}, 1000)
+  try {
+    const result = await fetchJson('https://relay.example.com/v1/dashboard/billing/usage', {
+      timeoutMs: 5,
+      fetchImpl: async (url, init) => ({
+        ok: true,
+        status: 200,
+        json: () => new Promise((resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(new Error('aborted')))
+        }),
       }),
-    }),
-  })
-  assert.deepEqual(result, { ok: false, reason: 'network', status: 200 })
+    })
+    assert.deepEqual(result, { ok: false, reason: 'network', status: 200 })
+  } finally {
+    clearInterval(keepAlive)
+  }
 })
 
 test('an intact body that is not JSON stays a payload failure', async () => {
