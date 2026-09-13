@@ -36,6 +36,36 @@ test('a bucket key carries the provider, and a bare model id still splits', () =
   })
   assert.deepEqual(splitBucketKey('deepseek-flash'), { provider: '', model: 'deepseek-flash' })
   assert.deepEqual(splitBucketKey(''), { provider: '', model: '' })
+
+  // A provider-less model id that contains slashes of its own must not be read
+  // as `provider/model`: the two-part form would invent `inclusionai` as an
+  // account and shorten the model id.
+  const free = 'inclusionai/ling-3.0-flash-sante:free'
+  assert.equal(bucketKeyOf('', free), `/${free}`)
+  assert.deepEqual(splitBucketKey(`/${free}`), { provider: '', model: free })
+  assert.deepEqual(splitBucketKey(bucketKeyOf('', free)), { provider: '', model: free })
+  // The provider-qualified form is untouched by the marker.
+  assert.equal(bucketKeyOf('commandcode', free), `commandcode/${free}`)
+  assert.deepEqual(splitBucketKey(bucketKeyOf('commandcode', free)), { provider: 'commandcode', model: free })
+})
+
+test('a provider-less model with a slash keeps its own row and invents no provider', () => {
+  const record = foldSessionEvents([
+    { ...SESSION, id: 'free' },
+    { type: 'request/header', seq: 1, time: MONDAY_NOON, data: { header: { config: { model: 'inclusionai/ling-3.0-flash-sante:free' } } } },
+    usageEvent(2, MONDAY_NOON, { inputTokens: 100, outputTokens: 10 }),
+  ])
+  assert.deepEqual(Object.keys(record.models), ['/inclusionai/ling-3.0-flash-sante:free'])
+  const view = buildHistoryView([record], { now: MONDAY_NOON })
+  assert.equal(view.models.length, 1)
+  assert.equal(view.models[0].provider, '')
+  assert.equal(view.models[0].providerLabel, '—')
+  assert.equal(view.models[0].model, 'inclusionai/ling-3.0-flash-sante:free')
+  assert.deepEqual(view.allProviders, [''])
+  // No rate card prices this id, so it reports tokens without a CNY figure.
+  assert.equal(view.models[0].source, 'unknown')
+  assert.equal(view.models[0].cost, 0)
+  assert.equal(view.models[0].costIncomplete, true)
 })
 
 test('the provider is read off the request header', () => {
@@ -79,7 +109,7 @@ test('pre-0.4.0 records (no provider in the key) still aggregate as one row', ()
   assert.deepEqual(view.allProviders, [''])
 })
 
-test('the board separates per-provider subtotals and never adds two units', () => {
+test('the board separates per-provider subtotals and sums them in one unit', () => {
   const records = [
     {
       id: 'a',
@@ -95,28 +125,28 @@ test('the board separates per-provider subtotals and never adds two units', () =
   const byId = Object.fromEntries(view.providers.map(row => [row.id, row]))
   // 1M off-peak miss tokens on the official card = ¥1.
   assert.equal(byId['deepseek-official'].cost, 1)
-  assert.deepEqual(byId['deepseek-official'].unit, { kind: 'money', currency: 'CNY' })
-  // The subscription's models are unpriced here (no card, no custom rates): the
-  // row exists, with tokens, and says so rather than costing zero.
+  // The subscription route's model is unpriced here (the CNY card does not list
+  // `deepseek-v4.1-flash`): the row exists, with tokens, and says so rather than
+  // costing zero.
   assert.equal(byId.commandcode.cost, 0)
   assert.equal(byId.commandcode.costIncomplete, true)
-  assert.deepEqual(byId.commandcode.unit, { kind: 'credits' })
-  // Two units in play: the cost metric falls back to tokens, and says so.
-  assert.equal(view.metric, 'tokens')
-  assert.equal(view.requestedMetric, 'cost')
-  assert.equal(view.metricFallback, true)
-  assert.equal(view.mixedUnits, true)
-  assert.equal(view.costUnit, undefined)
+  // Every figure is a CNY estimate from the same card, so the two rows are
+  // summable and the cost metric stays selected even across two accounts.
+  assert.equal(view.metric, 'cost')
+  assert.equal(view.totals.cost, 1)
+  assert.equal(byId.commandcode.unit, undefined)
 })
 
-test('a single unit keeps the cost metric and reports it', () => {
+test('the cost metric is one unit everywhere, with no fallback machinery left', () => {
   const records = [{ id: 'a', models: { 'deepseek-official/deepseek-flash': { days: { '2026-09-07': { peak: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, events: 0 }, idle: { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0, events: 1 } } } } } }]
   const view = buildHistoryView(records, { now: MONDAY_NOON, metric: 'cost' })
   assert.equal(view.metric, 'cost')
-  assert.equal(view.metricFallback, false)
-  assert.equal(view.mixedUnits, false)
-  assert.equal(view.costUnit, 'money:CNY')
   assert.equal(view.totals.cost, 1)
+  assert.equal(view.mixedUnits, undefined)
+  assert.equal(view.costUnit, undefined)
+  assert.equal(view.metricFallback, undefined)
+  assert.equal(view.requestedMetric, undefined)
+  for (const row of [...view.models, ...view.providers]) assert.equal(row.unit, undefined)
 })
 
 test('the provider filter narrows the board without hiding the alternatives', () => {
@@ -127,14 +157,13 @@ test('the provider filter narrows the board without hiding the alternatives', ()
       'commandcode/deepseek/deepseek-v4.1-flash': { days: { '2026-09-07': { peak: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, events: 0 }, idle: { input: 100, output: 0, cacheRead: 0, cacheWrite: 0, events: 1 } } } },
     },
   }]
-  const view = buildHistoryView(records, { now: MONDAY_NOON, providerFilter: 'deepseek-official' })
+  const view = buildHistoryView(records, { now: MONDAY_NOON, metric: 'cost', providerFilter: 'deepseek-official' })
   assert.equal(view.providerFilter, 'deepseek-official')
   assert.equal(view.models.length, 1)
   assert.equal(view.providers.length, 1)
   assert.deepEqual(view.allProviders, ['commandcode', 'deepseek-official'])
-  // One unit on screen after filtering, so cost is usable again.
-  assert.equal(view.mixedUnits, false)
-  assert.equal(view.costUnit, 'money:CNY')
+  assert.equal(view.metric, 'cost')
+  assert.equal(view.totals.cost, 1)
 })
 
 test('a provider-qualified custom rate wins over the bare model id', () => {
@@ -149,7 +178,11 @@ test('a provider-qualified custom rate wins over the bare model id', () => {
   assert.equal(rateSourceForKey('commandcode/deepseek/deepseek-v4.1-flash', { 'deepseek-v4.1-flash': custom['deepseek-flash'] }, MONDAY_NOON, 'commandcode', 'deepseek/deepseek-v4.1-flash'), 'custom')
 })
 
-test('the history cache version was bumped for the provider keys', async () => {
+test('the history cache version was bumped for the bucket-key encoding', async () => {
   const { CACHE_VERSION } = await import('../lib/history-scan.js')
-  assert.equal(CACHE_VERSION, 2)
+  const { BARE_KEY_PREFIX } = await import('../lib/history.js')
+  // v2 documents store a provider-less slashed model as `a/b`, which the v3
+  // split would read as provider `a`; the version bump is what retires them.
+  assert.equal(CACHE_VERSION, 3)
+  assert.equal(BARE_KEY_PREFIX, '/')
 })

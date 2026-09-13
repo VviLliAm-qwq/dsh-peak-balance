@@ -68,7 +68,7 @@ below) takes over the whole terminal with a GitHub-style contribution grid:
 | Quota diagnostics `/quota` | One command shows what is being read, which adapter answers, why the last read failed, and every provider route this process could ask about (`/quota check <provider>` probes one on the spot). |
 | Peak-hour warning | Optional. While peak pricing is active the status contribution becomes a rounded frame whose border, phase label and travelling waveform pulse in the chosen color. |
 | History grid `/th` | A full-screen scene: one square per day, shaded by that day's usage, with a hover card for the day under the pointer. Keyboard: `←/→` walks days, `↑/↓` walks weeks, `m` cycles the metric, `w` the span, `s` the subagent switch, `r` rescans, `q`/`Esc` returns to the conversation. |
-| Totals and per-model stats | Totals: tokens, estimated cost, cache-hit rate, active days, sessions, subagent share, busiest day. Model table: each model's total tokens, estimated cost, cache-hit rate and where its rates came from. |
+| Totals and per-model stats | Totals: tokens, estimated cost, cache-hit rate, active days, sessions, subagent share, busiest day. Model table: each model's total tokens, estimated cost, cache-hit rate and where its rates came from. The totals row covers **all history** (it does not follow the grid's span) and says so inline. |
 | Custom rates `/th price` | Price a model the embedded card does not list; until you do, it reports tokens with an explicit "unrated" marker instead of a guessed amount. |
 | Follows the UI language | **Instant** hand-off with dsh-TUI's `/lang`: the status line, the history scene and every command reply switch with it. The host mirrors the choice into its `dsh-tui` settings namespace and the plugin listens for `settings/updated`; a 1 s poll of `~/.dsh-tui/lang.json` covers hosts that serve no such namespace. The settings card and the command-completion descriptions were already bilingual. |
 | Settings subpage | The **Peak & Balance** card gains a **Token history** subpage with ten options. |
@@ -111,7 +111,7 @@ Main card:
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| Show balance | boolean | `true` | Show the account section on the status line (a quota meter, or the legacy balance readout). |
+| Show balance | boolean | `true` | Show the account section on the status line (the provider's quota meter, as an amount or a percentage). |
 | Show per-turn cost | boolean | `true` | Show what this turn has cost: a live estimate while the model answers, frozen when the turn closes (measured from the provider's counter when it has one). |
 | Peak-hour warning | boolean | `false` | Turn the line into a pulsing frame while peak pricing is active. |
 | Warning color | select | `red` | Frame color: `red` `orange` `yellow` `green` `cyan` `blue` `purple`. |
@@ -121,7 +121,7 @@ Main card:
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | Quota provider | text | `auto` | `auto` follows the focused conversation's provider; a provider id (`commandcode`, `openrouter`, …) pins that one; `off` hides the account section. |
-| Quota metric | select | `auto` | `auto` (the tightest window), `balance`, `window5h`, `windowWeekly`, `windowDaily`, `windowMonthly`, `planRemaining`, `keyLimit`, `periodSpend`, or `rotate` (cycle every meter, one every 8 s). |
+| Quota metric | select | `auto` | `auto` (the tightest window), `balance`, `window5h`, `windowWeekly`, `windowDaily`, `windowMonthly`, `planRemaining`, `keyLimit`, `periodSpend`, `lifetimeSpend`, or `rotate` (cycle every meter, one every 8 s). |
 | Turn spend | select | `auto` | `auto` (measured when the provider has a counter), `measured`, `estimate`. |
 | Unofficial endpoints | boolean | `false` | Allow quota reads from endpoints no provider documents publicly (mostly reverse-engineered console APIs). |
 | Provider spec file | text | empty | JSON file describing providers this build ships no adapter for; empty uses `~/.dsh-tui/dsh-peak-balance-providers.json`. |
@@ -326,7 +326,7 @@ ask it** — and degrades quietly at every step it cannot complete:
 | `openrouter` | `openrouter` | balance (credits − usage), key limit, daily/weekly/monthly usage | ⚠️ no — built from the official docs, tested with fixture payloads |
 | `moonshot-balance` | `moonshotai` / `moonshotai-cn` | balance (CNY on `.cn`, USD internationally) | ⚠️ no |
 | `siliconflow-balance` | `siliconflow` routes | balance (the API states no currency, so none is printed) | ⚠️ no |
-| `openai-billing` | gateways **declared in the composition** (One API, New API, self-hosted) | `soft/hard_limit_usd` balance plus `total_usage` (cents) | ⚠️ no |
+| `openai-billing` | gateways **declared in the composition** (One API, New API, self-hosted) | `soft/hard_limit_usd` (one grant, both fields equal) minus `total_usage` (cents); the unit follows the gateway's own display setting | ⚠️ no |
 | `declared` | anything in the spec file | whatever the spec says | — |
 
 OpenRouter's `/credits` requires a **management key** (an ordinary key is refused
@@ -418,7 +418,7 @@ Other recipes that need no code, only a spec stanza:
 | Host | `@deepseek-harness-tui/dsh-tui` 0.10.x (`ctx.tuiStatus.registerView`, `ctx.tuiSettingsSections.register`, `ctx.tuiScenes.register/open`, `ctx.commands.register`, `ctx.tuiCommandTrees.register`, `ctx.tuiShortcuts.register`) |
 | Harness | `@deepseek-ai/dsh` 0.1.2-rc.1 or later (`session/event`, `settings`, `credentials`) |
 | Runtime | Node `^22.19 \|\| >=24`, pure ESM, no native dependencies (multi-frame zstd uses the built-in `node:zlib`) |
-| Manifest | `manifestVersion` 0.15 · id `com.dsh-tui-ecosystem.dsh-peak-balance` · contracts `tui.dsh/v1alpha1#DecisionEvents` (optional) and `commands.dsh/v1alpha1#Command` (required) · three command contributions (`/hist`, `/th`, `/tokenhistory`) |
+| Manifest | `manifestVersion` 0.15 · id `com.dsh-tui-ecosystem.dsh-peak-balance` · contracts `tui.dsh/v1alpha1#DecisionEvents` (optional) and `commands.dsh/v1alpha1#Command` (required) · four command contributions (`/hist`, `/th`, `/tokenhistory`, `/quota`) |
 | Platform | Anywhere dsh-tui runs (Windows / macOS / Linux) |
 
 Every host seam is optional and probed softly (`ctx.get(name, false)`): without
@@ -466,16 +466,20 @@ overrides the file path for tests and diagnostics.
   from each provider's own documentation and tested with fixture payloads drawn
   from it; they have not been checked against a live account.
 - **Undocumented endpoints are opt-in** (`allowUnofficialQuota`), because they
-  can change without notice. Command Code's `/alpha/*` routes are exempt: they
-  are the ones the provider's own CLI drives.
+  can change without notice: a provider whose spec stanza (or the spec document)
+  sets `"allowUnofficial": true` is only queried while that global switch is on
+  too. Command Code's `/alpha/*` routes are exempt: they are the ones the
+  provider's own CLI drives.
 - **No Command Code price card is embedded.** Its model catalog carries no
   prices and its pricing page is generated client-side, so an estimate would have
   been invented; subscription models show tokens only until you set rates with
   `/hist price set commandcode:<model> …`, while the per-turn figure stays the
   provider's own measured number.
-- **`/hist` never adds two units together.** With providers of different
-  currencies selected at once (CNY next to credits) the `cost` metric falls back
-  to tokens, says so in the totals block, and lists a per-provider subtotal.
+- **Every `/hist` money figure is CNY.** A cost comes from a rate card — the
+  built-in table or your `/th price` custom rates — and both are denominated in
+  CNY per million tokens, so the totals block, the per-provider subtotals and
+  the model table all print `¥`. `credits` describes an account's own meter on
+  the status line; it is never a cost column.
 - **The history cache is at version 2**, so the first `/hist` after upgrading
   rebuilds it from the session logs (a few seconds on this machine; the scan
   checkpoints as it goes).
@@ -572,10 +576,10 @@ node ../../tools/probe-plugin.mjs . --wait 15
 ```
 
 The probe profile now mounts the `scenes`, `plugin-host`, `command-trees` and
-`extensions` (which carries `tuiShortcuts`) rows too, so the scene, the three
+`extensions` (which carries `tuiShortcuts`) rows too, so the scene, the four
 commands and the `alt+h` shortcut are verified as well; a passing run logs
-`history scene registered`, three `command registered` lines,
-`command tree registered roots=3` and `shortcut registered alt+h`, and exits 0.
+`history scene registered`, four `command registered` lines,
+`command tree registered roots=4` and `shortcut registered alt+h`, and exits 0.
 
 ### Verifying the history numbers
 

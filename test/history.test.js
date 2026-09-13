@@ -16,7 +16,6 @@ import {
   intensityThresholds,
   levelOf,
   metricValueOf,
-  sameLocalDay,
   stepGrid,
   todayKeyOf,
   totalTokensOf,
@@ -54,9 +53,11 @@ test('local midnight arithmetic is exact across month and DST-free boundaries', 
   assert.equal(dayKeyOf(dayStartMs(MONDAY_NOON)), '2026-09-07')
   assert.equal(dayKeyOf(addDays(dayStartMs(MONDAY_NOON), 1)), '2026-09-08')
   assert.equal(dayKeyOf(addDays(dayStartMs(MONDAY_NOON), -7)), '2026-08-31')
-  assert.equal(sameLocalDay(MONDAY_PEAK, MONDAY_NOON), true)
-  assert.equal(sameLocalDay(MONDAY_NOON, SATURDAY_NOON), false)
   assert.equal(dayStartMs(MONDAY_NOON) % 86_400_000, 16 * 60 * 60 * 1000)
+  // The same Beijing day is the same day key, a different one is not — this is
+  // all `sameLocalDay` used to assert before it was found to have no caller.
+  assert.equal(dayKeyOf(MONDAY_PEAK), dayKeyOf(MONDAY_NOON))
+  assert.notEqual(dayKeyOf(MONDAY_NOON), dayKeyOf(SATURDAY_NOON))
 })
 
 test('weekday rows follow the configured week start', () => {
@@ -203,8 +204,6 @@ test('buildHistoryView shapes the grid, totals and model table', () => {
   assert.equal(view.totals.events, 2)
   assert.equal(view.totals.activeDays, 1)
   assert.equal(view.totals.tokens, 2_000_000)
-  assert.equal(view.totals.firstActive, '2026-09-07')
-  assert.equal(view.totals.lastActive, '2026-09-07')
   assert.equal(view.totals.bestDay.key, '2026-09-07')
   assert.equal(view.totals.bestDay.value, 2_000_000)
   assert.equal(view.totals.cacheHitRate, 500_000 / 1_500_000)
@@ -333,7 +332,6 @@ test('an empty corpus still produces a renderable grid', () => {
   assert.equal(view.totals.tokens, 0)
   assert.equal(view.totals.sessions, 0)
   assert.equal(view.totals.activeDays, 0)
-  assert.equal(view.totals.firstActive, undefined)
   assert.equal(view.totals.bestDay, undefined)
   assert.equal(view.totals.costIncomplete, false)
   assert.equal(view.models.length, 0)

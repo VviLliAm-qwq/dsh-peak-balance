@@ -124,19 +124,11 @@ async function main() {
   const source = `/**
  * The provider catalog snapshot (GENERATED — do not edit by hand).
  *
- * Regenerate with \`node scripts/gen-provider-catalog.mjs [pi-ai path]\`. The
- * snapshot records the pi-ai release it was taken from; a provider missing here
- * is still reachable through a spec file (\`./spec.js\`).
+ * Regenerate with \`node scripts/gen-provider-catalog.mjs [pi-ai path]\`. A
+ * provider missing here is still reachable through a spec file (\`./spec.js\`).
  *
  * @module dsh-peak-balance/providers/catalog
  */
-
-/** Provenance of the snapshot. */
-export const CATALOG_SOURCE = Object.freeze({
-  package: '@earendil-works/pi-ai',
-  version: ${JSON.stringify(packageJson.version ?? '')},
-  generatedAt: ${JSON.stringify(new Date().toISOString())},
-})
 
 /**
  * \`provider route id -> { name, baseUrl?, apiKeyEnv?, protocol?, headers? }\`.

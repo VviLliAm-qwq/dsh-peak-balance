@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildHistoryView, foldSessionEvents } from '../lib/history.js'
+import { buildHistoryView, foldSessionEvents, gridPositionOf } from '../lib/history.js'
 import { createStore } from '../lib/store.js'
 import {
   FLASH_MS,
@@ -480,4 +480,159 @@ test('the detail card and the totals put their labels in the same column', () =>
   assert.ok(labelWidths.length >= 3, `expected detail/totals label cells, saw ${labelWidths.length}`)
   assert.equal(new Set(labelWidths).size, 1, 'all label columns must be the same width')
   rendered.harness.cleanup()
+})
+
+/**
+ * Rows the host lays out for one element tree.
+ *
+ * `height` pins a box (its children live inside it), a missing height makes a
+ * column add its children up, `borderStyle` adds a top and a bottom row, and
+ * `marginTop` adds a blank row above — exactly the three things the scene's own
+ * budget has to charge for.
+ */
+function rowCount(node) {
+  if (node === null || node === undefined || node === false || typeof node !== 'object') return 0
+  const props = node.props ?? {}
+  const margin = props.marginTop ?? 0
+  const border = props.borderStyle === undefined ? 0 : 2
+  if (typeof props.height === 'number') return props.height + margin + border
+  // Only element children stack; a text leaf is one line even though its own
+  // children are plain strings.
+  const elements = (node.children ?? []).filter(child => child !== null && child !== undefined && child !== false && typeof child === 'object')
+  const inner = elements.length === 0 ? 1 : elements.reduce((sum, child) => sum + rowCount(child), 0)
+  return inner + margin + border
+}
+
+test('every row the scene draws fits the terminal budget', () => {
+  const records = [
+    record('a', { inputTokens: 1_000_000, outputTokens: 2_000, cacheReadTokens: 500_000 }),
+    record('b', { inputTokens: 400_000 }, { model: 'mystery-model' }),
+    ...Array.from({ length: 8 }, (unused, index) => record(`m${index}`, { inputTokens: 10_000 }, { model: `filler-${index}` })),
+  ]
+  const sizes = [
+    { columns: 120, rows: 12 },
+    { columns: 120, rows: 14 },
+    { columns: 120, rows: 15 },
+    { columns: 72, rows: 24 },
+    { columns: 100, rows: 26 },
+    { columns: 60, rows: 18 },
+    { columns: 44, rows: 13 },
+    { columns: 24, rows: 10 },
+    { columns: 160, rows: 40 },
+    { columns: 200, rows: 30 },
+  ]
+  for (const size of sizes) {
+    const rendered = render({ size, spanWeeks: 26, records, metric: 'cost' })
+    const drawn = rowCount(rendered.tree)
+    // 120x14 is the case the missing `marginTop` used to push to 15 rows.
+    assert.ok(drawn <= size.rows, `${size.columns}x${size.rows} drew ${drawn} rows`)
+    rendered.harness.cleanup()
+  }
+})
+
+test('the totals row names the scope it sums', () => {
+  const zh = render({ size: { columns: 120, rows: 32 } })
+  assert.match(zh.text(), /\(全部历史\)/)
+  zh.harness.cleanup()
+
+  const en = render({ size: { columns: 120, rows: 32 }, lang: 'en' })
+  assert.match(en.text(), /\(all time\)/)
+  en.harness.cleanup()
+})
+
+test('per-provider rows price every account in CNY, credits route included', () => {
+  const withProvider = (id, provider, model, usage) => foldSessionEvents([
+    { type: 'session', id, createdAt: MONDAY_NOON },
+    { type: 'request/header', seq: 0, time: MONDAY_NOON, data: { header: { config: { provider, model } } } },
+    { type: 'assistant/message', seq: 1, time: MONDAY_NOON, data: { usage } },
+  ])
+  const rendered = render({
+    size: { columns: 120, rows: 32 },
+    records: [
+      withProvider('a', 'deepseek-official', 'deepseek-flash', { inputTokens: 1_000_000 }),
+      withProvider('b', 'commandcode', 'deepseek-flash', { inputTokens: 1_000_000 }),
+    ],
+  })
+  const providerRow = findNodes(rendered.tree, 'Box').find(node => node.props.key === 'providers')
+  assert.ok(providerRow, 'expected the per-provider row')
+  // A subscription route's tokens are priced from the same CNY card, so the row
+  // is ¥ like every other — never "credits" on one line and ¥ in the total.
+  assert.match(treeText(providerRow), /DeepSeek 1\.0M ¥1\.00/)
+  assert.match(treeText(providerRow), /Command Code 1\.0M ¥1\.00/)
+  assert.doesNotMatch(rendered.text(), /credits/)
+  rendered.harness.cleanup()
+})
+
+test('a scene whose store has no view yet renders the loading state', () => {
+  // `render()` cannot express this: its `view: undefined` option falls back to
+  // the view it just built. The real first open of `/hist` has no view at all
+  // until the preload or the first scan lands, and that frame must not throw.
+  const store = createStore({ status: 'loading', view: undefined, progress: { done: 3, total: 341 } })
+  const scene = createHistoryScene({
+    store,
+    getConfig: () => ({ ...DEFAULT_CONFIG }),
+    getLang: () => 'zh',
+    actions: {},
+    shade: hex => hex,
+  })
+  const harness = createFakeReact()
+  const { ui } = makeUi({ size: { columns: 120, rows: 32 } })
+  harness.beginRender()
+  const text = treeText(scene({ React: harness.React, ui, close() {} }))
+  // The defensive loading branch (the wiring publishes an empty view before it
+  // opens the scene, so this is the "no view at all" fallback).
+  assert.match(text, /正在读取会话日志/)
+  assert.match(text, /Token 历史/)
+  harness.cleanup()
+})
+
+test('a span change that drops the selected day keeps the arrow keys alive', () => {
+  const records = [record('a', { inputTokens: 1_000_000 })]
+  const viewFor = span => buildHistoryView(records, { now: MONDAY_NOON, spanWeeks: span, weekStart: 'mon' })
+  const store = createStore({ status: 'ready', view: viewFor(13), scannedAt: MONDAY_NOON })
+  const config = { ...DEFAULT_CONFIG }
+  const scene = createHistoryScene({
+    store,
+    getConfig: () => config,
+    getLang: () => 'zh',
+    actions: {},
+    shade: hex => hex,
+  })
+  const harness = createFakeReact()
+  const { ui, captured } = makeUi({ size: { columns: 120, rows: 32 } })
+  const draw = () => {
+    harness.beginRender()
+    return treeText(scene({ React: harness.React, ui, close() {} }))
+  }
+  /** The day the detail card names (`2026-09-07  周一`). */
+  const selectedDay = text => /(\d{4}-\d{2}-\d{2}) {2}周/.exec(text)?.[1]
+
+  draw()
+  for (let index = 0; index < 10; index += 1) {
+    captured.input('', { leftArrow: true })
+    draw()
+  }
+  const moved = selectedDay(draw())
+  assert.notEqual(moved, undefined)
+  assert.notEqual(moved, '2026-09-07', 'precondition: the cursor left today')
+
+  // The wiring swaps the view when the span changes; the cursor's column is no
+  // longer part of the grid. Before the fix the selection stayed on that dead
+  // key: the caret vanished and `←` did nothing at all.
+  config.historySpanWeeks = '2'
+  store.set({ ...store.get(), view: viewFor(2) })
+  const afterSpanChange = selectedDay(draw())
+  assert.notEqual(
+    gridPositionOf(viewFor(2), afterSpanChange),
+    undefined,
+    'the selection must fall back to a day the new grid actually draws',
+  )
+  // The caret points at the selection, so an off-grid key would hide it too.
+  assert.match(draw(), /▲/)
+
+  captured.input('', { leftArrow: true })
+  const after = selectedDay(draw())
+  assert.notEqual(after, afterSpanChange)
+  assert.notEqual(gridPositionOf(viewFor(2), after), undefined)
+  harness.cleanup()
 })

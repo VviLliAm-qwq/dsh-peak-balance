@@ -48,6 +48,22 @@ test('openrouter: credits minus usage is the balance, and the key carries the co
   assert.deepEqual(snapshot.spendCounter, { id: 'key.usage', value: 7.5, unit: { kind: 'money', currency: 'USD' } })
 })
 
+test('openrouter: a transport failure is named instead of printed as an undefined status', async () => {
+  // `/credits` never answers while `/key` does, so the failure note must name
+  // the reason rather than render `HTTP undefined`.
+  const impl = fakeFetch({
+    '/credits': () => undefined,
+    '/key': json({ data: { usage: 2, usage_daily: 0.5 } }),
+  })
+  const snapshot = await collectOpenRouter({
+    provider: 'openrouter',
+    profile: { baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk-or' },
+    fetchImpl: impl,
+  })
+  assert.equal(snapshot.ok, true)
+  assert.deepEqual(snapshot.failures, ['credits: network'])
+})
+
 test('openrouter: a normal key refused by /credits still reports through /key', async () => {
   const impl = fakeFetch({
     '/credits': json({ error: 'Only management keys can perform this operation' }, 403),
@@ -92,6 +108,10 @@ test('openrouter: an unconfigured key never reaches the network', async () => {
 test('moonshot: the host decides the currency', () => {
   assert.equal(currencyOf('https://api.moonshot.cn/v1'), 'CNY')
   assert.equal(currencyOf('https://api.moonshot.ai/v1'), 'USD')
+  // The hostname is parsed, so a lookalike host or a path cannot choose the
+  // label on the figure.
+  assert.equal(currencyOf('https://api.moonshot.cn.evil.tld/v1'), 'USD')
+  assert.equal(currencyOf('https://evil.tld/api.moonshot.cn'), 'USD')
 })
 
 test('moonshot: zero balances are left off the line', () => {
@@ -120,11 +140,22 @@ test('moonshot: the CN route reports a CNY balance from its own endpoint', async
 
 /* -------------------------------------------------------- SiliconFlow */
 
-test('siliconflow: string figures are parsed and no currency is invented', () => {
+test('siliconflow: the total is the headline, the parts ride along with labels', () => {
+  // The provider's own schema samples `balance / chargeBalance / totalBalance`
+  // as `0.88 / 88.00 / 88.88`, so `balance` alone is the promotional part.
   const parsed = parseSiliconflow({ data: { balance: '0.88', chargeBalance: '88', totalBalance: '88.88' } })
-  const balance = parsed.meters.find(meter => meter.id === 'balance')
-  assert.deepEqual([balance.remaining, balance.currency], [0.88, undefined])
-  assert.deepEqual(parsed.meters.map(meter => meter.id), ['balance', 'balance-total', 'balance-charged'])
+  const headline = parsed.meters.find(meter => meter.id === 'balance')
+  assert.deepEqual([headline.remaining, headline.currency], [88.88, undefined])
+  assert.deepEqual(parsed.meters.map(meter => meter.id), ['balance', 'balance-granted', 'balance-charged'])
+  assert.deepEqual(parsed.meters.map(meter => meter.label), [undefined, 'gift', 'recharged'])
+  // Unknown ids have no i18n label, so each part names itself.
+  assert.equal(parsed.meters.find(meter => meter.id === 'balance-granted').remaining, 0.88)
+  assert.equal(parsed.meters.find(meter => meter.id === 'balance-charged').remaining, 88)
+})
+
+test('siliconflow: without a total the gift balance stays the headline', () => {
+  const parsed = parseSiliconflow({ data: { balance: '0.88' } })
+  assert.deepEqual(parsed.meters, [{ id: 'balance', kind: 'money', remaining: 0.88 }])
 })
 
 test('siliconflow: identical figures collapse into one meter', () => {

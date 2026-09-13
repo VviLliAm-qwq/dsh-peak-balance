@@ -3,15 +3,11 @@ import assert from 'node:assert/strict'
 
 import {
   failSnapshot,
-  meterById,
-  meterRatio,
-  meterRemaining,
   normalizeMeter,
   okSnapshot,
   orderedMeters,
   pickMeter,
   primaryMeter,
-  spendCounterOf,
   spendDelta,
 } from '../lib/quota.js'
 
@@ -37,7 +33,6 @@ test('a snapshot keeps usable meters only and normalizes the counter unit', () =
   assert.equal(snapshot.ok, true)
   assert.equal(snapshot.meters.length, 3)
   assert.deepEqual(snapshot.spendCounter, { id: 'usage.totalCredits', value: 1.5, unit: { kind: 'credits' } })
-  assert.equal(spendCounterOf(snapshot), 1.5)
 })
 
 test('a failed snapshot carries a normalized reason and never a meter list', () => {
@@ -45,12 +40,12 @@ test('a failed snapshot carries a normalized reason and never a meter list', () 
   assert.equal(snapshot.reason, 'invalid')
   assert.equal(snapshot.status, 500)
   assert.deepEqual(snapshot.meters, undefined)
-  assert.equal(spendCounterOf(snapshot), undefined)
 })
 
 test('meters rotate in the stable id order, unknown ids last', () => {
-  const ids = orderedMeters({ meters: [...METERS, { id: 'custom', remaining: 1 }] }).map(meter => meter.id)
-  assert.deepEqual(ids, ['window5h', 'windowWeekly', 'balance', 'custom'])
+  const ids = orderedMeters({ meters: [...METERS, { id: 'lifetimeSpend', used: 1 }, { id: 'custom', remaining: 1 }] })
+    .map(meter => meter.id)
+  assert.deepEqual(ids, ['window5h', 'windowWeekly', 'balance', 'lifetimeSpend', 'custom'])
 })
 
 test('the primary meter prefers an exceeded window, then a window, then a balance', () => {
@@ -78,19 +73,6 @@ test('rotation walks every meter and wraps', () => {
 test('an empty snapshot has nothing to pick', () => {
   assert.equal(pickMeter({ meters: [] }, 'auto').meter, undefined)
   assert.equal(primaryMeter({ ok: false, reason: 'network' }), undefined)
-})
-
-test('a meter ratio needs a cap and accepts a remaining-only reading', () => {
-  assert.equal(meterRatio(meterById({ meters: METERS }, 'window5h')), 3 / 14)
-  assert.equal(meterRatio({ id: 'window5h', cap: 10, remaining: 4 }), 0.6)
-  assert.equal(meterRatio({ id: 'balance', remaining: 4 }), undefined)
-  assert.equal(meterRatio(undefined), undefined)
-})
-
-test('a remaining amount is derived from cap and used when only those exist', () => {
-  assert.equal(meterRemaining({ id: 'window5h', used: 3, cap: 10 }), 7)
-  assert.equal(meterRemaining({ id: 'balance', remaining: 4 }), 4)
-  assert.equal(meterRemaining({ id: 'periodSpend', used: 4 }), undefined)
 })
 
 test('a spend delta ignores a missing reading and refuses to report a rollover as a refund', () => {

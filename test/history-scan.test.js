@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { zstdCompressSync } from 'node:zlib'
@@ -8,6 +8,7 @@ import { zstdCompressSync } from 'node:zlib'
 import {
   CACHE_VERSION,
   ZSTD_MAGIC,
+  collectLogFiles,
   decodeLog,
   frameSize,
   historyCachePath,
@@ -348,6 +349,99 @@ test('recordsFromCache restores the scan order and skips unusable entries', asyn
     assert.deepEqual(recordsFromCache({ files: { a: { size: 1 }, b: null } }), [])
     assert.deepEqual(recordsFromCache(undefined), [])
     assert.deepEqual(recordsFromCache({ files: null }), [])
+    // `typeof [] === 'object'`, so an array document must be refused too.
+    assert.deepEqual(recordsFromCache({ files: [{ record: { id: 'x' } }] }), [])
+    // Only an object-shaped record is trusted; a number or a string is not.
+    assert.deepEqual(recordsFromCache({ files: { a: { record: 7 }, b: { record: 'x' }, c: { record: [] } } }), [])
+    const real = { id: 'ok', models: {} }
+    assert.deepEqual(recordsFromCache({ files: { d: { mtimeMs: 1, record: real } } }), [real])
+  } finally {
+    tree.cleanup()
+  }
+})
+
+test('a cache document whose shape is wrong is refused, not spread', () => {
+  assert.deepEqual(parseCache(JSON.stringify({ version: CACHE_VERSION, files: [1, 2] })).files, {})
+  assert.deepEqual(parseCache(JSON.stringify({ version: CACHE_VERSION, files: 'nope' })).files, {})
+  assert.deepEqual(parseCache(JSON.stringify([1, 2])).files, {})
+  assert.deepEqual(parseCache('null').files, {})
+})
+
+test('collectLogFiles reports the logs a cap or the walk left out', () => {
+  const tree = makeTree()
+  try {
+    assert.equal(listLogFiles(tree.root).length, 2)
+    const capped = collectLogFiles(tree.root, { maxFiles: 1 })
+    assert.equal(capped.files.length, 1)
+    assert.equal(capped.dropped, 1)
+    assert.equal(capped.skippedLinks, 0)
+    assert.equal(capped.tooDeep, 0)
+
+    // A nesting cap refuses to descend rather than looping on a link-like tree.
+    const shallow = collectLogFiles(tree.root, { maxDepth: 0 })
+    assert.equal(shallow.files.length, 0)
+    assert.equal(shallow.tooDeep, 1)
+  } finally {
+    tree.cleanup()
+  }
+})
+
+test('a linked log is counted as skipped instead of silently ignored', () => {
+  const tree = makeTree()
+  try {
+    const link = join(tree.root, '--work--', 'session.linked.jsonl.zstd')
+    try {
+      // Windows only allows this with Developer Mode or elevation; where it is
+      // not allowed the guard below is simply not exercised.
+      symlinkSync(join(tree.root, '--work--', 's1', 'session.jsonl.zstd'), link)
+    } catch {
+      return
+    }
+    const listing = collectLogFiles(tree.root)
+    assert.equal(listing.skippedLinks, 1)
+    assert.equal(listing.files.length, 2)
+  } finally {
+    tree.cleanup()
+  }
+})
+
+test('a log whose tail frame is incomplete is reported instead of quietly short', async () => {
+  const tree = makeTree()
+  try {
+    const cachePath = historyCachePath({ DSH_TUI_STATE_DIR: tree.stateDir })
+    await scanSessions({ root: tree.root, cachePath })
+
+    // A real log being appended to: the last frame is only half written.
+    const target = join(tree.root, '--work--', 's1', 'session.jsonl.zstd')
+    const partial = frame('{"type":"assistant/message","seq":9,"data":{"usage":{"inputTokens":3}}}')
+    writeFileSync(target, Buffer.concat([readFileSync(target), partial.subarray(0, 12)]))
+
+    const warnings = []
+    const scan = await scanSessions({ root: tree.root, cachePath, onWarning: message => warnings.push(message) })
+    assert.equal(scan.stats.scanned, 1)
+    assert.equal(scan.stats.reused, 1)
+    assert.equal(scan.stats.truncatedLogs, 1)
+    const truncated = scan.records.find(record => record.truncated === true)
+    assert.equal(truncated.id, 's1')
+    // The complete frames still made it into the record.
+    assert.equal(truncated.events, 1)
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0], /partial frame/)
+
+    // A corpus cut by the cache cap says so too, instead of shortening history
+    // without a word.
+    const capped = []
+    const limited = await scanSessions({
+      root: tree.root,
+      cachePath: join(tree.stateDir, 'other.json'),
+      maxFiles: 1,
+      onWarning: message => capped.push(message),
+    })
+    assert.equal(limited.stats.files, 1)
+    assert.equal(limited.stats.droppedFiles, 1)
+    // The truncated log warns here too (same corpus), so assert on the cap
+    // message itself rather than on the total call count.
+    assert.equal(capped.filter(message => /not scanned \(cache cap\)/.test(message)).length, 1)
   } finally {
     tree.cleanup()
   }

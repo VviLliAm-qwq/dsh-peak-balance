@@ -22,6 +22,13 @@ const CONFIG = { showBalance: true, showTurnCost: true, warnOnPeak: false, warnC
 
 const partText = model => model.parts.map(part => `${part.key}:${part.text}`).join(' | ')
 
+/** A pay-as-you-go account meter, the shape the plugin's wiring publishes. */
+const quotaMoney = (amount, currency = 'CNY') => ({
+  state: 'meter',
+  mode: 'money',
+  meter: { id: 'balance', kind: 'money', currency, remaining: amount },
+})
+
 test('the line always carries the phase and its countdown', () => {
   const peak = buildDisplay({ atMs: PEAK_AT, lang: 'zh', config: CONFIG })
   assert.equal(peak.peak, true)
@@ -97,36 +104,34 @@ test('the two display switches remove their own part only', () => {
     atMs: PEAK_AT,
     lang: 'zh',
     config: { ...CONFIG, showBalance: false },
-    balance: { state: 'ok', amount: 12.34 },
+    quota: quotaMoney(12.34),
     lastTurn: { cost: { total: 0.0234 }, tokens: 100, model: 'deepseek-flash', turn: 1 },
   })
-  assert.doesNotMatch(partText(noBalance), /balance:/)
+  assert.doesNotMatch(partText(noBalance), /quota:/)
   assert.match(partText(noBalance), /turn:本轮 ¥0.0234/)
 
   const noTurn = buildDisplay({
     atMs: PEAK_AT,
     lang: 'zh',
     config: { ...CONFIG, showTurnCost: false },
-    balance: { state: 'ok', amount: 12.34 },
+    quota: quotaMoney(12.34),
     lastTurn: { cost: { total: 0.0234 }, tokens: 100, model: 'deepseek-flash', turn: 1 },
   })
   assert.doesNotMatch(partText(noTurn), /turn:/)
-  assert.match(partText(noTurn), /balance:余额 ¥12.34/)
+  assert.match(partText(noTurn), /quota:余额 ¥12.34/)
 })
 
-test('balance states render an honest label instead of a number', () => {
-  const cases = [
-    [{ state: 'loading' }, /余额 查询中…/, 'muted'],
-    [{ state: 'no-key' }, /余额 未配置密钥/, 'muted'],
-    [{ state: 'unauthorized' }, /余额 密钥无效/, 'error'],
-    [{ state: 'error' }, /余额 暂不可用/, 'muted'],
-  ]
-  for (const [balance, pattern, tone] of cases) {
-    const model = buildDisplay({ atMs: PEAK_AT, lang: 'zh', config: CONFIG, balance })
-    const part = model.parts.find(entry => entry.key === 'balance')
-    assert.match(part.text, pattern)
-    assert.equal(part.tone, tone)
-  }
+test('a spent-out account reads as zero, not as six decimal places', () => {
+  const zero = buildDisplay({ atMs: PEAK_AT, lang: 'zh', config: CONFIG, quota: quotaMoney(0) })
+  assert.match(partText(zero), /quota:余额 ¥0$/)
+
+  const credits = buildDisplay({
+    atMs: PEAK_AT,
+    lang: 'zh',
+    config: CONFIG,
+    quota: { state: 'meter', mode: 'money', meter: { id: 'balance', kind: 'credits', remaining: 0 } },
+  })
+  assert.match(partText(credits), /quota:余额 0 credits$/)
 })
 
 test('an unsettled turn shows a dash, an unrated one says so', () => {
@@ -179,22 +184,12 @@ test('a live turn on an unrated model says so instead of guessing', () => {
   assert.match(model.parts.find(entry => entry.key === 'turn').text, /本轮·计费中 费率未知/)
 })
 
-test('the balance is formatted in the currency the endpoint reported', () => {
-  const usd = buildDisplay({
-    atMs: PEAK_AT,
-    lang: 'zh',
-    config: CONFIG,
-    balance: { state: 'ok', amount: 5, currency: 'USD' },
-  })
-  assert.match(usd.parts.find(entry => entry.key === 'balance').text, /余额 \$5\.00/)
+test('the account figure is formatted in the currency the provider reported', () => {
+  const usd = buildDisplay({ atMs: PEAK_AT, lang: 'zh', config: CONFIG, quota: quotaMoney(5, 'USD') })
+  assert.match(usd.parts.find(entry => entry.key === 'quota').text, /余额 \$5\.00/)
 
-  const cny = buildDisplay({
-    atMs: PEAK_AT,
-    lang: 'zh',
-    config: CONFIG,
-    balance: { state: 'ok', amount: 12.34, currency: 'CNY' },
-  })
-  assert.match(cny.parts.find(entry => entry.key === 'balance').text, /余额 ¥12\.34/)
+  const cny = buildDisplay({ atMs: PEAK_AT, lang: 'zh', config: CONFIG, quota: quotaMoney(12.34) })
+  assert.match(cny.parts.find(entry => entry.key === 'quota').text, /余额 ¥12\.34/)
 })
 
 test('the turn figure sits ahead of the balance so truncation hits the balance first', () => {
@@ -202,8 +197,8 @@ test('the turn figure sits ahead of the balance so truncation hits the balance f
     atMs: PEAK_AT,
     lang: 'zh',
     config: CONFIG,
-    balance: { state: 'ok', amount: 12.34, currency: 'CNY' },
+    quota: quotaMoney(12.34),
     lastTurn: { cost: { total: 0.0234 }, tokens: 100, model: 'deepseek-flash', turn: 1 },
   })
-  assert.deepEqual(model.parts.map(part => part.key), ['phase', 'countdown', 'turn', 'balance'])
+  assert.deepEqual(model.parts.map(part => part.key), ['phase', 'countdown', 'turn', 'quota'])
 })

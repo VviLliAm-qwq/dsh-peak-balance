@@ -76,6 +76,20 @@ test('a new turn drops whatever an abandoned turn left in the bucket', () => {
   assert.equal(tracker.endTurn(beijing(2026, 9, 10, 13, 5)), undefined)
 })
 
+test('a new turn also drops the abandoned turn’s provider', () => {
+  const tracker = createTracker()
+  tracker.setProvider('providerA')
+  // The interrupted round reported usage but never closed, so its provider is
+  // still on record when the next round starts.
+  tracker.onUsage({ inputTokens: 1_000_000 }, beijing(2026, 9, 10, 13, 0))
+  tracker.beginTurn()
+  // The new round runs through another route: the settled figure must name it,
+  // not the route the abandoned round happened to report.
+  tracker.setProvider('providerB')
+  tracker.onUsage({ inputTokens: 1_000_000 }, beijing(2026, 9, 10, 13, 5))
+  assert.equal(tracker.endTurn(beijing(2026, 9, 10, 13, 6)).provider, 'providerB')
+})
+
 test('the running turn is priced with its own model, not a later header', () => {
   const tracker = createTracker()
   tracker.setModel('deepseek-flash')

@@ -7,7 +7,6 @@ import { join } from 'node:path'
 import {
   PEAK_MULTIPLIER,
   RATES_VERSION,
-  describeEntry,
   makeEntry,
   normalizeEntry,
   normalizeTier,
@@ -18,7 +17,6 @@ import {
   readRates,
   serializeRates,
   withRate,
-  withoutAllRates,
   withoutRate,
   writeRates,
 } from '../lib/rates.js'
@@ -171,7 +169,6 @@ test('withRate and withoutRate are pure and strip provider prefixes', () => {
   assert.equal(removed.model, 'mystery')
   assert.deepEqual(Object.keys(removed.rates), ['other'])
   assert.deepEqual(withoutRate({}, 'nope'), { rates: {}, model: 'nope', removed: false })
-  assert.deepEqual(withoutAllRates(), {})
 })
 
 test('readRates and writeRates round-trip on disk and never throw', () => {
@@ -197,10 +194,4 @@ test('readRates and writeRates round-trip on disk and never throw', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
-})
-
-test('describeEntry flattens one entry for display', () => {
-  const described = describeEntry(makeEntry({ hit: 1, miss: 2, out: 3 }, 8))
-  assert.deepEqual(described, { hit: 1, miss: 2, out: 3, peakHit: 2, peakMiss: 4, peakOut: 6, updatedAt: 8 })
-  assert.equal(describeEntry(undefined), undefined)
 })

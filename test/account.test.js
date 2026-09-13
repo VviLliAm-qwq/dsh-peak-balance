@@ -133,6 +133,68 @@ test('a spec-declared provider with no base URL is unsupported rather than guess
   assert.deepEqual([snapshot.ok, snapshot.reason], [false, 'unsupported'])
 })
 
+/* -------------------------------------------------- unofficial endpoints */
+
+/** A spec whose provider stanza admits its endpoint is undocumented. */
+function unofficialSpec(stanzaFlag, documentFlag) {
+  return {
+    allowUnofficial: documentFlag,
+    apiBases: { 'my-relay': 'https://relay.example.com' },
+    providers: {
+      'my-relay': {
+        provider: 'my-relay',
+        adapter: 'declared',
+        authKind: 'bearer',
+        apiKeyEnv: 'MY_RELAY_KEY',
+        allowUnofficial: stanzaFlag,
+        requests: [{
+          path: '/console/balance',
+          method: 'GET',
+          headers: {},
+          meters: [{ id: 'balance', kind: 'money', currency: 'USD', valuePath: 'data.quota' }],
+        }],
+        spendCounter: undefined,
+      },
+    },
+  }
+}
+
+/** Collect the unofficial spec with one `allowUnofficialQuota` setting. */
+function collectUnofficial(spec, allowUnofficialQuota) {
+  return collectQuota({
+    provider: 'my-relay',
+    config: { allowUnofficialQuota },
+    spec,
+    llmServices: llm([]),
+    settingsServices: settings({}),
+    credentialsServices: credentials({ MY_RELAY_KEY: 'tok' }),
+    fetchImpl: async () => json({ data: { quota: 5 } }),
+  })
+}
+
+test('a provider stanza declaring an unofficial endpoint is refused without the opt-in', async () => {
+  const refused = await collectUnofficial(unofficialSpec(true, false), false)
+  assert.deepEqual([refused.ok, refused.reason], [false, 'unsupported'])
+  assert.match(refused.detail, /allowUnofficialQuota/)
+  // The setting is the switch: with it on, the same read goes through.
+  const allowed = await collectUnofficial(unofficialSpec(true, false), true)
+  assert.equal(allowed.ok, true)
+  assert.equal(allowed.meters[0].remaining, 5)
+})
+
+test('a document-level allowUnofficial declaration gates every provider in it', async () => {
+  const refused = await collectUnofficial(unofficialSpec(false, true), false)
+  assert.deepEqual([refused.ok, refused.reason], [false, 'unsupported'])
+  assert.match(refused.detail, /allowUnofficialQuota/)
+  const allowed = await collectUnofficial(unofficialSpec(false, true), true)
+  assert.equal(allowed.ok, true)
+})
+
+test('a spec that declares nothing unofficial is not gated', async () => {
+  const snapshot = await collectUnofficial(unofficialSpec(false, false), false)
+  assert.equal(snapshot.ok, true)
+})
+
 test('a throwing adapter is contained', async () => {
   const snapshot = await collectQuota({
     provider: 'deepseek-official',

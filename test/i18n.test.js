@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { langPrefFile, langPrefStamp, normalizeLang, resolveLang, t } from '../lib/i18n.js'
+import { STRING_KEYS, langPrefFile, langPrefStamp, normalizeLang, resolveLang, t } from '../lib/i18n.js'
 
 test('normalizeLang maps locale-ish strings onto the shipped languages', () => {
   for (const value of ['zh', 'zh-CN', 'ZH', ' zh-TW ']) assert.equal(normalizeLang(value), 'zh')
@@ -73,9 +73,10 @@ test('langPrefStamp reports a change and tolerates a missing file', () => {
 
 test('every locale-sensitive string exists in both languages', () => {
   const keys = [
-    'peak', 'idle', 'balance', 'turn', 'historyTitle', 'historyScanning', 'historyNoData',
+    'peak', 'idle', 'turn', 'historyTitle', 'historyScanning', 'historyNoData',
     'historySubagentOn', 'historySubagentOff', 'historyWindow', 'historyExcluded', 'historyHint',
     'historyPriceTitle', 'historyBadArgs', 'historyUsageThCaveat', 'historyUsageShortcut',
+    'historyTotalsScope', 'meterLifetimeSpend', 'meterBalanceGranted', 'meterBalanceCharged',
   ]
   for (const key of keys) {
     for (const lang of ['zh', 'en']) {
@@ -89,4 +90,11 @@ test('every locale-sensitive string exists in both languages', () => {
   assert.equal(t('zh', 'nope'), 'nope')
   assert.equal(t('fr', 'peak'), t('en', 'peak'))
   assert.equal(t('zh', 'historyScanning', undefined), '扫描中')
+})
+
+test('the zh and en tables carry exactly the same keys', () => {
+  // A key that exists in one table only renders as the raw key in the other
+  // language, which is invisible until somebody switches language. The sampled
+  // list above cannot catch that; this can.
+  assert.deepEqual([...STRING_KEYS.zh].sort(), [...STRING_KEYS.en].sort())
 })

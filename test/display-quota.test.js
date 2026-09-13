@@ -32,6 +32,27 @@ test('an unknown meter id falls back to its own label, then to the id', () => {
   assert.equal(meterText('zh', { id: 'mystery', kind: 'count', used: 3 }), 'mystery 3.00')
 })
 
+test('a cap without a usage figure still shows the shape of the account', () => {
+  // A relay answers `/subscription` but not `/usage`: the remaining amount is
+  // deliberately left unknown rather than over-reported, so the figure slot
+  // says so instead of collapsing to a bare label.
+  assert.equal(meterText('zh', { id: 'balance', kind: 'money', currency: 'USD', cap: 20 }), '余额 —/$20.00')
+  assert.equal(meterText('zh', { id: 'balance', kind: 'money', currency: 'CNY' }), '余额')
+})
+
+test('the split-balance meter ids carry their own localized labels', () => {
+  // SiliconFlow reports a promotional balance next to the topped-up one; the
+  // adapter labels them in English so they are readable anywhere, and the view
+  // localizes them when it can. Those amounts carry no currency (the API never
+  // names one), so no symbol is invented for them.
+  assert.equal(meterText('zh', { id: 'balance-granted', kind: 'money', remaining: 0.88 }), '赠金 0.8800')
+  assert.equal(meterText('en', { id: 'balance-granted', kind: 'money', remaining: 0.88 }), 'gift 0.8800')
+  assert.equal(meterText('zh', { id: 'balance-charged', kind: 'money', remaining: 88 }), '充值 88.00')
+  assert.equal(meterText('en', { id: 'balance-charged', kind: 'money', remaining: 88 }), 'recharged 88.00')
+  // A provider that does name one keeps its symbol.
+  assert.equal(meterText('zh', { id: 'balance-granted', kind: 'money', currency: 'USD', remaining: 0.88 }), '赠金 $0.8800')
+})
+
 test('an amount formats by unit, with the credit word only where it helps', () => {
   assert.equal(formatMeterAmount('zh', 1.5, { kind: 'money', currency: 'USD' }), '$1.50')
   assert.equal(formatMeterAmount('zh', 0.25, { kind: 'credits' }), '0.2500 credits')
@@ -73,11 +94,9 @@ test('no quota state renders no part at all', () => {
   assert.equal(quotaPart('zh', null), undefined)
 })
 
-test('buildDisplay omits the account part when neither a quota nor a balance is given', () => {
+test('buildDisplay omits the account part when no quota state is given', () => {
   const display = buildDisplay({ atMs: 0, lang: 'zh', config: { showBalance: true }, quota: undefined })
   assert.deepEqual(display.parts.map(part => part.key), ['phase', 'countdown'])
-  const legacy = buildDisplay({ atMs: 0, lang: 'zh', config: { showBalance: true }, balance: { state: 'no-key' } })
-  assert.deepEqual(legacy.parts.map(part => part.key), ['phase', 'countdown', 'balance'])
 })
 
 test('a measured spend decorates the turn label and marks an inexact figure', () => {

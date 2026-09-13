@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Config, SETTINGS_NS, apply, balanceStateOf, forcePeakFromEnv, sanitizeConfig, seamServices, settingsSection } from '../lib/plugin.js'
+import { Config, SETTINGS_NS, apply, forcePeakFromEnv, sanitizeConfig, seamServices, settingsSection } from '../lib/plugin.js'
 import { SCENE_ID } from '../lib/history-command.js'
 import { CACHE_VERSION } from '../lib/history-scan.js'
 import { foldSessionEvents } from '../lib/history.js'
@@ -171,26 +171,6 @@ test('the diagnostic peak override is opt-in and off by default', () => {
   }
 })
 
-test('balanceStateOf maps every documented failure to a display state', () => {
-  assert.deepEqual(balanceStateOf({ ok: true, balances: [{ currency: 'CNY', total: 3 }] }), {
-    state: 'ok',
-    amount: 3,
-    currency: 'CNY',
-  })
-  // A non-CNY account keeps its own currency, so the view cannot print ¥ over
-  // a dollar figure (`cnyBalance` falls back to the first reported entry).
-  assert.deepEqual(balanceStateOf({ ok: true, balances: [{ currency: 'USD', total: 5 }] }), {
-    state: 'ok',
-    amount: 5,
-    currency: 'USD',
-  })
-  assert.deepEqual(balanceStateOf({ ok: true, balances: [] }), { state: 'error' })
-  assert.deepEqual(balanceStateOf({ ok: false, reason: 'no-key' }), { state: 'no-key' })
-  assert.deepEqual(balanceStateOf({ ok: false, reason: 'unauthorized' }), { state: 'unauthorized' })
-  assert.deepEqual(balanceStateOf({ ok: false, reason: 'network' }), { state: 'error' })
-  assert.deepEqual(balanceStateOf(undefined), { state: 'error' })
-})
-
 test('the settings card declares the four switches plus the history and quota groups', () => {
   const section = settingsSection()
   assert.equal(section.ns, SETTINGS_NS)
@@ -245,6 +225,7 @@ test('the settings card declares the four switches plus the history and quota gr
     'planRemaining',
     'keyLimit',
     'periodSpend',
+    'lifetimeSpend',
     'rotate',
   ])
   const spend = section.fields.find(field => field.path[0] === 'turnSpendMode')
@@ -319,6 +300,48 @@ test('a host without any seam stays inert and never throws', () => {
   })
 })
 
+test('a settings write that omits a key never resets it to its default', () => {
+  withoutSecrets(() => {
+    const ctx = makeCtx()
+    const services = makeServices(ctx.__record)
+    // A settings scope shaped like the host's: `get` answers the whole section
+    // while `watch` reports whatever the writer handed to `update` — a one-key
+    // patch included. Merging such a patch over the DEFAULTS (which is exactly
+    // what `sanitizeConfig` returns when it is handed a bare patch) would bring
+    // every other key back, so each visit to the settings card would undo the
+    // previous one.
+    let stored = {}
+    let watcher
+    services.settings = {
+      register: () => ({
+        get: () => stored,
+        update: async patch => {
+          stored = { ...stored, ...patch }
+          watcher?.(patch)
+        },
+        watch: listener => {
+          watcher = listener
+          return () => {
+            watcher = undefined
+          }
+        },
+      }),
+    }
+    ctx.get = name => services[name]
+    apply(ctx, undefined)
+    assert.equal(typeof watcher, 'function')
+    assert.match(renderLine(ctx), /本轮/)
+
+    watcher({ showTurnCost: false })
+    assert.doesNotMatch(renderLine(ctx), /本轮/)
+
+    // The discriminating write: it says nothing about `showTurnCost`.
+    watcher({ warnColor: 'cyan' })
+    assert.doesNotMatch(renderLine(ctx), /本轮/)
+    ctx.__dispose()
+  })
+})
+
 test('a throwing service accessor is contained', () => {
   withoutSecrets(() => {
     const ctx = makeCtx({ getThrows: true })
@@ -373,7 +396,7 @@ test('every seam is registered once, with the documented shape', () => {
     assert.equal(ctx.__record.scenes.length, 1)
     assert.equal(ctx.__record.scenes[0].id, SCENE_ID)
     assert.equal(typeof ctx.__record.scenes[0].component, 'function')
-    assert.deepEqual(ctx.__record.trees.map(tree => tree.root), ['th', 'tokenhistory', 'hist'])
+    assert.deepEqual(ctx.__record.trees.map(tree => tree.root), ['th', 'tokenhistory', 'hist', 'quota'])
     assert.deepEqual(ctx.__record.shortcuts.map(shortcut => shortcut.combo), ['alt+h'])
     assert.equal(typeof ctx.__record.shortcuts[0].handler, 'function')
     assert.equal(ctx.__record.shortcuts[0].description.length > 0, true)

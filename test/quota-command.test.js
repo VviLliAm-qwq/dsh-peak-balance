@@ -10,6 +10,7 @@ test('the argument parser accepts the three verbs and rejects everything else', 
   assert.deepEqual(parseQuotaArgs('check commandcode'), { kind: 'check', provider: 'commandcode' })
   assert.equal(parseQuotaArgs('check a b').kind, 'error')
   assert.deepEqual(parseQuotaArgs('meter window5h'), { kind: 'meter', metric: 'window5h' })
+  assert.deepEqual(parseQuotaArgs('meter lifetimeSpend'), { kind: 'meter', metric: 'lifetimeSpend' })
   assert.equal(parseQuotaArgs('meter').reason, 'bad-args')
   assert.equal(parseQuotaArgs('meter calories').reason, 'bad-meter')
   assert.equal(parseQuotaArgs('frobnicate').reason, 'unknown-subcommand')
@@ -23,6 +24,7 @@ test('the argument parser accepts the three verbs and rejects everything else', 
     'planRemaining',
     'keyLimit',
     'periodSpend',
+    'lifetimeSpend',
     'rotate',
   ])
 })
@@ -49,6 +51,20 @@ test('a report names the provider, the adapter, the meter figures and the spec f
   assert.match(text, /window5h \(credits\) used=1 cap=14/)
   assert.match(text, /\/tmp\/providers\.json/)
   assert.match(text, /commandcode  commandcode-plan/)
+})
+
+test('an out-of-range reset instant is left off instead of failing the whole report', () => {
+  // A spec-declared `resetAt` can exceed the Date range; `toISOString()` would
+  // throw a RangeError and the command would answer with an error instead of a
+  // report. The meter figures still print.
+  const text = renderQuotaReport('en', {
+    ...REPORT,
+    updatedAt: 9_000_000_000_000_000,
+    meters: [{ id: 'window5h', kind: 'credits', used: 1, cap: 14, resetAt: 9_000_000_000_000_000 }],
+  })
+  assert.match(text, /window5h \(credits\) used=1 cap=14/)
+  assert.doesNotMatch(text, /reset=/)
+  assert.doesNotMatch(text, /\n {2}at /)
 })
 
 test('a failure report says so, and an unroutable provider is marked with no adapter', () => {

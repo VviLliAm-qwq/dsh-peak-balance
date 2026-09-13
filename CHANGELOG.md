@@ -6,6 +6,155 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-13
+
+### Fixed
+
+- **A settings write can no longer reset the settings it does not mention.** The
+  settings watcher merged the host's payload over the schema *defaults* rather
+  than over the current values, so a host that reports a one-key patch — and a
+  scene `m`/`w`/`s` press is exactly that — brought every other key back to its
+  default. The watcher now merges over what is in force, and a test drives the
+  scope directly (the shared harness stubs `watch` as a no-op, which is why the
+  path had no coverage at all).
+- **The measured per-turn spend belongs to the conversation whose turn it was.**
+  The provider's spend counter is global, but the baseline was a single
+  plugin-wide instance: a parked conversation opening a turn rebased the counter
+  the focused conversation was about to settle against (measured: 0.15 instead
+  of 0.25 credits for the same window), and the figure was then credited to
+  whichever conversation happened to be focused when the provider answered. The
+  baseline, the retry budget and the pending retry now live on each
+  conversation's tracker entry.
+- **A forced account refresh is no longer dropped while one is in flight.**
+  `turn/end` settles a measured spend against a fresh reading; it used to join a
+  refresh that had started *before* the provider booked the request, so the turn
+  read as ≈0 credits until the retry budget ran out. A forced refresh now waits
+  for the in-flight pass and then reads again.
+- **A zero amount renders as `0`.** `formatMoney`/`formatDecimal` derived their
+  precision from the magnitude, so a spent-out account printed `¥0.000000` and a
+  freshly reset window printed `0.000000/1000.00`. An exact zero is now `¥0` /
+  `0` / `0 credits`.
+- **`/hist` keeps its caret across a span change.** `w` shrank the grid while the
+  cursor still named a day the new grid no longer draws, and every arrow key then
+  answered "no move" with the caret hidden. The cursor is validated against the
+  current grid, falls back to the default day, and the visible window is
+  re-clamped so the selection can never sit off-screen.
+- **`/hist` budgets the rows it really draws.** The detail card and the totals
+  block each occupy a leading blank row that the budget did not count, so a
+  14-row terminal was handed 15 rows. Both are charged now, and the model table
+  reserves its separator, header and rule before the rows.
+- **The `openai-billing` relay adapter reads the dashboard pair correctly.**
+  One API / New API return `soft_limit_usd` and `hard_limit_usd` as the *same*
+  grant (remaining + used), not as a remaining amount — verified against upstream
+  `controller/billing.go` — so the previous reading reported the full grant as
+  the balance and pinned any percentage at 100%. The remaining is now
+  `limit − total_usage/100`; a soft value that differs from the hard one is still
+  read as a remaining amount, and the currency comes from the provider spec
+  instead of a hard-coded `USD`, because a gateway with currency display turned
+  off answers in raw quota units.
+- **`allowUnofficialQuota` finally gates something.** A provider whose spec
+  stanza (or spec document) declares `"allowUnofficial": true` is only queried
+  while that setting is on. Previously the list of opt-in adapters was empty, so
+  the documented safety switch gated nothing. **Migration:** a spec-based relay
+  that declares `allowUnofficial` must now also turn the setting on, exactly as
+  the README always described.
+- **Provider routing by host is exact.** The registry decided ownership with
+  `baseUrl.includes(host)`, so `https://api.moonshot.cn.example.tld/v1` could
+  claim the Moonshot adapter and be handed that route's key; the comparison is
+  now on parsed host names (exact or a real subdomain). The `kimi` / `moonshot`
+  alias routes are claimed the same way, so an alias with no base URL is reported
+  as having no quota interface instead of being sent to the CN host and labelled
+  CNY.
+- **A transport failure no longer reads as a bad payload.** In `fetchJson`, a
+  body that dies mid-read because the request timed out is reported `network`
+  rather than `invalid`, and a non-2xx response cancels its body instead of
+  leaving the socket for the garbage collector.
+- **A DeepSeek account with `balance_infos: []` is not reported as "no API".** An
+  empty list is a 200 that carries no balance; it is now `invalid`, which is what
+  "nothing usable in the payload" means, instead of a successful zero-meter
+  snapshot that rendered as an unsupported provider.
+- **One bad field can no longer fail a whole `/quota` report.** An out-of-range
+  `resetAt` (only reachable from a spec file) made `toISOString()` throw a
+  `RangeError` and replaced the report with one error line; the instant is now
+  printed only when it is a real date. A relay's transport failure also stopped
+  printing `HTTP undefined` — in both `openai-billing` and `openrouter`, the
+  failure note names the reason when there is no status.
+- **A credential in a spec URL's query string is not echoed back.** The
+  `/quota` report renders a declared request's failure note, and the host
+  persists command output in the session log, so `/api/usage?key=sk-…` is now
+  reported as `/api/usage?…`.
+- **The history scene no longer throws before it can say "loading".** The
+  `view.providerFilter` / `view.days.get(...)` reads sat above the
+  `view === undefined` guard, so the branch the file documents as "keeps a
+  partial host renderable" was in fact a render-time throw. Unreachable through
+  the plugin's own wiring (the scene is opened after a publish) and fixed as a
+  guard.
+- **A scan that finishes short of the whole corpus says so.** A log whose tail
+  frame is still being written, or a corpus larger than the cache cap, now
+  reaches the plugin's log through `scanSessions`' `onWarning` and is counted in
+  the scan line (`truncated=` / `dropped=`), instead of being a silent
+  difference between the board and the session directory.
+- **The diagnostic log is trimmed by bytes at a line boundary.** Trimming used a
+  UTF-16 `slice` over the same number as the byte budget and could cut a
+  multi-byte character in half.
+
+### Changed
+
+- **`/hist` prints every money figure as CNY.** A cost comes from a rate card —
+  the built-in table or `/th price` custom rates — and both are denominated in
+  CNY per million tokens, so the totals block, the per-provider subtotals and the
+  model table now agree instead of the model table printing `¥` while a
+  per-provider row printed a `credits` label (and a provider the card had no
+  entry for lost its money entirely, e.g. `deepseek-pro-vision`). The
+  mixed-unit fallback to tokens is gone with it; a provider's `credits`
+  denomination describes its own account meter on the status line, not a cost
+  column. The history cache version is bumped to 3 for the key change below.
+- **The totals row says what it counts.** It has always aggregated all history
+  rather than the weeks on screen; it now says so inline (`1,079,834,040
+  (全部历史) · …`) — the scope rides next to the figure rather than inside the
+  fixed-width label cell, which is 12 cells wide and would truncate it.
+- **The account section no longer has a legacy renderer.** `buildDisplay` takes
+  the provider-neutral `quota` model only.
+- **Every command contribution now gets its localized completion tree.** `/quota`
+  was declared in the manifest and registered as a command but had no tree, so
+  its menu entry fell back to the English registry description — the completion
+  tree now covers all four roots (the retry loop tracks them by name, so a root
+  that fails while the others land is still filled in).
+- A provider-less bucket key whose model id contains a slash
+  (`inclusionai/ling-3.0-flash-sante:free`) is marked with a leading `/`, so
+  splitting a key can no longer invent a provider from the model name.
+- A relay's cumulative usage meter is now `lifetimeSpend` (One API's `/usage`
+  ignores any date range) and is selectable from `Quota metric` like every other
+  meter id.
+- **A money figure whose currency the provider never named is printed without a
+  symbol.** `formatMoney` defaults to CNY for the plugin's own cost estimates,
+  but a vendor that answers a bare number (SiliconFlow's `totalBalance`) has not
+  said the figure is yuan — so the meter now reads `赠金 0.8800` instead of
+  stamping `¥` on it, which is the guess the adapters deliberately refuse to
+  make.
+- **A known cap with an unknown figure renders as `—/cap`** rather than
+  collapsing to a bare label: a relay whose `/usage` read failed shows
+  `余额 —/$20.00` instead of `余额`. The relay adapters never over-report a
+  remaining amount, so this is the honest presentation of "the grant is known,
+  the spend is not".
+- The scan reports the files it dropped at the 3000-log cap and the logs it found
+  with a partial trailing frame, instead of shortening history silently; the walk
+  no longer follows links and stops at a nesting depth of 8.
+
+### Removed
+
+- The legacy DeepSeek balance path — `fetchBalance`, `BALANCE_ENDPOINT`,
+  `BALANCE_TIMEOUT_MS`, `cnyBalance`, `balanceStateOf`, and `buildDisplay`'s
+  `balance` option with `balancePart`. It had been unreachable since 0.4.0 (the
+  wiring publishes `quota`) and re-implemented the timeout/abort/failure
+  classification that `providers/http.js` exists to centralize.- Other unreferenced helpers: `formatBeijingClock`, `PRICE_CARD_SOURCE`,
+  `CATALOG_SOURCE`, `BILLING_MODES`, `spendCounterOf`, `meterRatio`,
+  `meterRemaining`, `withoutAllRates`, `describeEntry`, `PEAK_WINDOW_TEXT`,
+  `clockText`, `sameLocalDay`, `unitKeyOf`, `PROVIDER_UNITS`, `providerUnitOf`,
+  the dead local `spendOwnerId`, `tracker`'s `emptyTotals` re-export, and the
+  i18n keys `balance`, `quotaSpent`, `quotaLeft`, `historySubagent` and
+  `historyCostMixed`.
+
 ## [0.5.0] - 2026-09-13
 
 ### Changed

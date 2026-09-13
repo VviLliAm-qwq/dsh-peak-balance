@@ -1,22 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { BEIJING_OFFSET_MS, PEAK_WINDOW_TEXT, clockText, isPeak, peakPhase } from '../lib/peak.js'
+import { BEIJING_OFFSET_MS, isPeak, peakPhase } from '../lib/peak.js'
 
 /** Beijing wall clock -> UTC instant (2026-09-10 is a Thursday). */
 function beijing(year, month, day, hour, minute = 0) {
   return Date.UTC(year, month - 1, day, hour, minute) - BEIJING_OFFSET_MS
 }
-
-test('clockText pads to HH:MM', () => {
-  assert.equal(clockText(9 * 60), '09:00')
-  assert.equal(clockText(12 * 60), '12:00')
-  assert.equal(clockText(14 * 60 + 5), '14:05')
-})
-
-test('peak window text lists both official windows', () => {
-  assert.equal(PEAK_WINDOW_TEXT, '09:00-12:00 / 14:00-18:00')
-})
 
 test('peak windows include the start and exclude the end', () => {
   const thursday = [2026, 9, 10]

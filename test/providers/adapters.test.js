@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { collect as collectCommandCode, parseCommandCode, planInfo } from '../../lib/providers/commandcode.js'
 import { collect as collectDeclared } from '../../lib/providers/declared.js'
 import { collect as collectDeepSeek } from '../../lib/providers/deepseek.js'
-import { billingUrls, collect as collectBilling, parseBilling } from '../../lib/providers/openai-billing.js'
+import { billingCurrency, billingUrls, collect as collectBilling, parseBilling } from '../../lib/providers/openai-billing.js'
 import { meterById } from '../../lib/quota.js'
 
 /** A fetch stand-in keyed by URL suffix. */
@@ -64,6 +64,14 @@ test('deepseek: 401 is reported as a rejected key, and a transport failure as a 
   const offline = fakeFetch({ '/user/balance': () => undefined })
   const second = await collectDeepSeek({ provider: 'deepseek-official', profile: { apiKey: 'sk-x' }, fetchImpl: offline })
   assert.equal(second.reason, 'network')
+})
+
+test('deepseek: an empty balance list is invalid, not a successful empty snapshot', async () => {
+  // A 200 with zero meters would render as "no interface" once the account
+  // section falls back, which is wrong for a provider that answered.
+  const impl = fakeFetch({ '/user/balance': json({ is_available: false, balance_infos: [] }) })
+  const snapshot = await collectDeepSeek({ provider: 'deepseek-official', profile: { apiKey: 'sk-x' }, fetchImpl: impl })
+  assert.deepEqual([snapshot.ok, snapshot.reason], [false, 'invalid'])
 })
 
 /* ------------------------------------------------------------ Command Code */
@@ -150,15 +158,57 @@ test('commandcode: plan ids resolve by longest prefix', () => {
 
 /* ------------------------------------------------------- OpenAI billing */
 
-test('billing: soft limit is the remaining USD, usage is cents', () => {
+test('billing: a gateway that really reports a remaining soft limit is honoured', () => {
+  // `soft !== hard` is the one shape where `soft_limit_usd` is a remaining
+  // amount (the old OpenAI dashboard convention); `hard` is then the grant.
   const parsed = parseBilling({
     subscription: { soft_limit_usd: 12.5, hard_limit_usd: 20 },
     usage: { total_usage: 750 },
   })
   const balance = parsed.meters.find(meter => meter.id === 'balance')
   assert.deepEqual([balance.remaining, balance.cap, balance.currency], [12.5, 20, 'USD'])
-  assert.equal(parsed.meters.find(meter => meter.id === 'periodSpend').used, 7.5)
+  assert.equal(parsed.meters.find(meter => meter.id === 'lifetimeSpend').used, 7.5)
   assert.deepEqual(parsed.spendCounter, { id: 'billing.total_usage', value: 7.5, unit: { kind: 'money', currency: 'USD' } })
+})
+
+test('billing: the one-api shape carries the grant, so remaining is grant minus usage', () => {
+  // Upstream one-api answers `soft = hard = system_hard = (remaining + used)`;
+  // reading `soft` as "what is left" would report the whole grant as remaining.
+  const parsed = parseBilling({
+    subscription: { soft_limit_usd: 20, hard_limit_usd: 20, system_hard_limit_usd: 20 },
+    usage: { total_usage: 750 },
+  })
+  const balance = parsed.meters.find(meter => meter.id === 'balance')
+  assert.deepEqual([balance.remaining, balance.cap], [12.5, 20])
+  assert.equal(parsed.meters.find(meter => meter.id === 'lifetimeSpend').used, 7.5)
+})
+
+test('billing: without a usage figure the remaining amount is left unknown', () => {
+  // The grant is known and printed; a stand-in for "what is left" would always
+  // over-report, so the meter carries no `remaining` at all.
+  const parsed = parseBilling({ subscription: { soft_limit_usd: 20, hard_limit_usd: 20 } })
+  const balance = parsed.meters.find(meter => meter.id === 'balance')
+  assert.deepEqual([balance.remaining, balance.cap], [undefined, 20])
+  assert.equal(parsed.spendCounter, undefined)
+})
+
+test('billing: the unit defaults to USD and a spec may name another one', () => {
+  const usd = parseBilling({ subscription: { soft_limit_usd: 20, hard_limit_usd: 20 }, usage: { total_usage: 750 } })
+  assert.ok(usd.meters.every(meter => meter.currency === 'USD'))
+  const cny = parseBilling({
+    subscription: { soft_limit_usd: 20, hard_limit_usd: 20 },
+    usage: { total_usage: 750 },
+    currency: 'cny',
+  })
+  assert.ok(cny.meters.every(meter => meter.currency === 'CNY'))
+  assert.equal(cny.spendCounter.unit.currency, 'CNY')
+})
+
+test('billing: the currency override comes from the spec spend unit', () => {
+  const spec = { provider: 'my-gw', adapter: 'openai-billing', spendUnit: { kind: 'money', currency: 'cny' }, requests: [] }
+  assert.equal(billingCurrency(spec), 'CNY')
+  assert.equal(billingCurrency(undefined), 'USD')
+  assert.equal(billingCurrency({ spendUnit: { kind: 'money' } }), 'USD')
 })
 
 test('billing: the unlimited sentinel is not rendered as a balance', () => {
@@ -187,6 +237,30 @@ test('billing: a live pair produces a balance for a relay', async () => {
   assert.equal(snapshot.ok, true)
   assert.equal(meterById(snapshot, 'balance').remaining, 3.25)
   assert.equal(snapshot.spendCounter.value, 6.75)
+})
+
+test('billing: a live one-api pair reports grant minus usage, in the spec unit', async () => {
+  const impl = fakeFetch({
+    '/subscription': json({ soft_limit_usd: 20, hard_limit_usd: 20 }),
+    '/usage': json({ total_usage: 750 }),
+  })
+  const spec = { provider: 'my-cny-gw', adapter: 'openai-billing', spendUnit: { kind: 'money', currency: 'CNY' }, requests: [] }
+  const snapshot = await collectBilling({
+    provider: 'my-cny-gw',
+    profile: { baseUrl: 'https://relay.example.com/v1', apiKey: 'sk-x' },
+    spec,
+    fetchImpl: impl,
+  })
+  const balance = meterById(snapshot, 'balance')
+  assert.deepEqual([balance.remaining, balance.cap, balance.currency], [12.5, 20, 'CNY'])
+  assert.equal(balance.remaining, 20 - 750 / 100)
+})
+
+test('billing: a transport failure is named, not printed as an undefined status', async () => {
+  const impl = fakeFetch({ '/subscription': () => undefined, '/usage': json({ total_usage: 675 }) })
+  const snapshot = await collectBilling({ provider: 'my-gw', profile: { baseUrl: 'https://relay.example.com/v1', apiKey: 'sk-x' }, fetchImpl: impl })
+  assert.equal(snapshot.ok, true)
+  assert.deepEqual(snapshot.failures, ['subscription: network'])
 })
 
 /* ----------------------------------------------------------- declared */
@@ -236,6 +310,33 @@ test('declared: an unreadable path contributes no meter rather than a zero', asy
     fetchImpl: impl,
   })
   assert.deepEqual([snapshot.ok, snapshot.reason], [false, 'invalid'])
+})
+
+test('declared: a credential in the request query is not echoed into the failure note', async () => {
+  // `/quota` renders these notes and the host persists command output, so a spec
+  // that carries a key in the query must not have it written down.
+  const spec = {
+    ...SPEC,
+    requests: [
+      SPEC.requests[0],
+      {
+        path: '/api/usage?key=sk-secret-value',
+        method: 'GET',
+        headers: {},
+        meters: [{ id: 'keyLimit', kind: 'count', valuePath: 'data.limit' }],
+      },
+    ],
+    spendCounter: undefined,
+  }
+  const impl = fakeFetch({ '/api/user/self': json({ data: { quota: 2500000, used_quota: 500000 } }) })
+  const snapshot = await collectDeclared({
+    provider: 'my-relay',
+    profile: { baseUrl: 'https://relay.example.com', apiKey: 'tok' },
+    spec,
+    fetchImpl: impl,
+  })
+  assert.equal(snapshot.ok, true)
+  assert.deepEqual(snapshot.failures, ['/api/usage?…: HTTP 404'])
 })
 
 test('declared: a relative reset time is converted against the injected clock', async () => {

@@ -60,7 +60,7 @@ DeepSeek 峰谷计费时钟 · 实时余额 · 每轮花费 · `/hist` 历史用
 | 额度诊断 `/quota` | 一条命令看清算的是什么、谁在应答、上次为什么失败，以及本进程能路由到的全部 provider（`/quota check <provider>` 现场探测）。 |
 | 峰时警告 | 可选。高峰时段生效时，状态行变成圆角边框，边框、时段标签与右侧波形按设定颜色脉动。 |
 | 历史方格图 `/hist` | 全屏场景：一天一格、按当天用量深浅着色，鼠标悬停出当日明细；键盘按**方格**挪动（`←/→` 前后一周、`↑/↓` 前后一天、`t` 回到今天），另有 `m` 指标、`w` 跨度、`s` 子代理、`r` 刷新、`q`/`Esc` 返回。 |
-| 总计与模型维度 | 总计：总 token、总花费（估）、缓存命中率、活跃天数、会话数、子代理占比、峰值日；模型表：每个模型的总用量、总花费、总缓存命中率与费率来源。 |
+| 总计与模型维度 | 总计：总 token、总花费（估）、缓存命中率、活跃天数、会话数、子代理占比、峰值日；模型表：每个模型的总用量、总花费、总缓存命中率与费率来源。总计行统计**全部历史**（不随方格显示的跨度变化），行内标注「全部历史」以说明这一点。 |
 | 自定义费率 `/hist price` | 内置价目表没收录的模型由你自己补单价；未设置前只显示 token 并标注「费率未知」，绝不猜金额。 |
 | 跟随界面语言 | 与 dsh-tui 的 `/lang` **即时联动**：状态行、历史场景、命令回执都跟着切（宿主把选择写进 `dsh-tui` 设置命名空间，插件监听 `settings/updated` 事件；没挂该命名空间的宿主由 1 秒轮询 `~/.dsh-tui/lang.json` 兜底）。设置卡片与命令补全描述本来就中英双语。 |
 | 设置子页 | `/settings` 的 **Peak & Balance（峰谷与余额）** 卡片新增 **Token history（历史用量）** 子页，共 10 个选项（含场景版式与色阶）。 |
@@ -86,7 +86,7 @@ dsh plugin --profile dsh-tui add file:/到本仓库的绝对路径/dsh-peak-bala
 > dsh plugin --profile dsh-tui add file:/到本仓库的绝对路径/dsh-peak-balance
 > ```
 
-## 设置项（四项 + 历史用量子页十项）
+## 设置项（主卡片四项 + 历史用量十项 + provider 额度七项）
 
 主卡片：
 
@@ -102,7 +102,7 @@ dsh plugin --profile dsh-tui add file:/到本仓库的绝对路径/dsh-peak-bala
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | Quota provider / 额度来源 | text | `auto` | `auto` 跟随聚焦对话的 provider；填 provider id（如 `commandcode`、`openrouter`）固定其中一个；`off` 隐藏账户那一段。 |
-| Quota metric / 额度口径 | select | `auto` | `auto`（最紧的窗口）、`balance`、`window5h`、`windowWeekly`、`windowDaily`、`windowMonthly`、`planRemaining`、`keyLimit`、`periodSpend`、`rotate`（轮换，每 8 秒换一个口径）。 |
+| Quota metric / 额度口径 | select | `auto` | `auto`（最紧的窗口）、`balance`、`window5h`、`windowWeekly`、`windowDaily`、`windowMonthly`、`planRemaining`、`keyLimit`、`periodSpend`、`lifetimeSpend`（累计已用）、`rotate`（轮换，每 8 秒换一个口径）。 |
 | Turn spend / 每轮花费口径 | select | `auto` | `auto`（有计数器就实测）、`measured`、`estimate`。 |
 | Unofficial endpoints / 允许非公开端点 | boolean | `false` | 是否允许读取厂商未公开文档的额度端点（多为逆向控制台接口）。 |
 | Provider spec file / provider 声明文件 | text | 空 | 描述本包未内置适配器的 provider 的 JSON 文件；留空用 `~/.dsh-tui/dsh-peak-balance-providers.json`。 |
@@ -223,7 +223,7 @@ alt+h                                 # 同上（不用打字；聊天状态下�
 | `openrouter` | `openrouter` | 余额（credits − usage）、key 限额、日/周/月用量 | ⚠️ 未核对（按官方文档实现，夹具测试） |
 | `moonshot-balance` | `moonshotai` / `moonshotai-cn` | 余额（`.cn` 为 CNY，国际站为 USD） | ⚠️ 未核对 |
 | `siliconflow-balance` | `siliconflow` 路由 | 余额（接口未标注币种，按原值显示） | ⚠️ 未核对 |
-| `openai-billing` | 组合里**声明**的网关/自建路由（One API、New API 等） | `soft/hard_limit_usd` 余额 + `total_usage`（美分） | ⚠️ 未核对 |
+| `openai-billing` | 组合里**声明**的网关/自建路由（One API、New API 等） | `soft/hard_limit_usd`（两字段同值，是总额度）减去 `total_usage`（美分）；单位跟随网关自己的显示设置 | ⚠️ 未核对 |
 | `declared` | 声明文件里的任意 provider | 由声明决定 | — |
 
 OpenRouter 的 `/credits` 需要**管理密钥**（普通 key 会 403）；插件会同时请求 `/key`，因此只有普通 key 时仍然显示 key 限额与用量。
@@ -289,7 +289,7 @@ OpenRouter 的 `/credits` 需要**管理密钥**（普通 key 会 403）；插�
 | 宿主 | `@deepseek-harness-tui/dsh-tui` 0.10.x（`ctx.tuiStatus.registerView`、`ctx.tuiSettingsSections.register`、`ctx.tuiScenes.register/open`、`ctx.commands.register`、`ctx.tuiCommandTrees.register`、`ctx.tuiShortcuts.register`） |
 | Harness | `@deepseek-ai/dsh` 0.1.2-rc.1+（`session/event`、`settings`、`credentials`） |
 | 运行时 | Node `^22.19 \|\| >=24`，纯 ESM，无原生依赖（多帧 zstd 用内建 `node:zlib`） |
-| Manifest | `manifestVersion` 0.15 · id `com.dsh-tui-ecosystem.dsh-peak-balance` · 契约 `tui.dsh/v1alpha1#DecisionEvents`（optional）+ `commands.dsh/v1alpha1#Command`（required）· 三条命令贡献（`/hist`、`/th`、`/tokenhistory`） |
+| Manifest | `manifestVersion` 0.15 · id `com.dsh-tui-ecosystem.dsh-peak-balance` · 契约 `tui.dsh/v1alpha1#DecisionEvents`（optional）+ `commands.dsh/v1alpha1#Command`（required）· 四条命令贡献（`/hist`、`/th`、`/tokenhistory`、`/quota`） |
 | 平台 | dsh-tui 能跑的平台（Windows / macOS / Linux） |
 
 所有宿主接缝都是软探测（`ctx.get(name, false)`）：缺少 TUI 扩展服务、缺少 credentials 服务或没有网络时，插件保持静默而不是让宿主失败；注册会在 profile 组合期间重试 30 秒，所有定时器都由 activation 的 effect 清理。
@@ -307,9 +307,9 @@ OpenRouter 的 `/credits` 需要**管理密钥**（普通 key 会 403）；插�
 - 价目表内置在包内，官方调价需要插件更新；未收录的模型需要你自己用 `/hist price set` 补单价。
 - 账户那一段依赖 provider 自己的接口：**没有公开额度接口的 provider 不会显示任何数字**（OpenAI、Gemini、Anthropic 预付费余额、GLM/Kimi 编程套餐、Claude 订阅等），而不是显示一个猜出来的值。可以用声明文件接入自家部署或未内置的接口。
 - **只有 DeepSeek 官方与 Command Code 两个适配器经过真实账户核对**（见上文表格）；其余具名适配器按各自官方文档实现，并用文档/源码里的夹具 payload 测试，未经真实账户核对。
-- **非公开端点默认关闭**：`allowUnofficialQuota` 打开后才允许访问厂商未公开文档的端点（如逆向的控制台接口）。Command Code 的 `/alpha/*` 不受该开关限制——那是官方 CLI 自己走的端点。
+- **非公开端点默认关闭**：spec 里声明 `"allowUnofficial": true` 的 provider，只有在全局的 `allowUnofficialQuota` 也打开时才会被访问（如逆向的控制台接口）。Command Code 的 `/alpha/*` 不受该开关限制——那是官方 CLI 自己走的端点。
 - **不内置 Command Code 的价目表**：它的模型目录不带价格、价格页是前端渲染的，编一份出来就是猜。订阅套餐里的模型在 `/hist` 只显示 token，直到你用 `/hist price set commandcode:<model> …` 给出单价；状态行的「本轮」仍然是实测扣减。
-- **`/hist` 的总额不跨计价单位相加**：选中多个 provider 且计价单位不同（CNY 与 credits）时，`cost` 口径会退回 token 并注明，合计区按 provider 分列。
+- **`/hist` 的金额一律是「元」**：成本由价目表算出（内置价目或 `/th price` 自定义费率，单位都是元/百万 token），所以合计行、按 provider 分列与模型表都按 `¥` 显示。`credits` 是状态行上账户自己的额度口径，不参与成本列。
 - **历史缓存升到 v2**：升级后的第一次 `/hist` 会重建缓存（本机约 4~5 秒，边扫边落盘）。
 - **`/quota` 的 provider 列表**来自 `ctx.llm.listConfigurableProviders()`、内置目录快照与声明文件；组合里声明但宿主当前不可路由的 provider 可能不在列表里。
 - **余额按接口回报的币种显示**：接口在 `currency` 里给出币种（`CNY` / `USD` …），状态行使用对应符号（`¥` / `$`）；未知币种回退成 ISO 代码（如 `12.34 CHF`），不会把美元当人民币显示。
@@ -342,7 +342,7 @@ pnpm verify              # 以上四项依次执行
 node ../../tools/probe-plugin.mjs . --wait 15
 ```
 
-探测 profile 现在会一并挂载 `scenes` / `plugin-host` / `command-trees` / `extensions`（含 `tuiShortcuts`）四行，因此场景、三条命令与 `alt+h` 快捷键的注册都会被验证；期望输出里能看到 `history scene registered`、三行 `command registered`、`command tree registered roots=3` 与 `shortcut registered alt+h`，退出码 0。
+探测 profile 现在会一并挂载 `scenes` / `plugin-host` / `command-trees` / `extensions`（含 `tuiShortcuts`）四行，因此场景、四条命令与 `alt+h` 快捷键的注册都会被验证；期望输出里能看到 `history scene registered`、四行 `command registered`、`command tree registered roots=4` 与 `shortcut registered alt+h`，退出码 0。
 
 ### 校验历史数字（真值校验）
 

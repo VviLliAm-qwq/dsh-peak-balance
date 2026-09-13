@@ -178,3 +178,55 @@ test('a turn’s spend is measured from the provider counter, not estimated', as
     })
   })
 })
+
+test('a second conversation’s turn cannot rebase the first one’s measurement', async () => {
+  // The spend baseline is per conversation. With a single plugin-wide baseline,
+  // conversation B opening a turn (and settling) rebased the counter A was
+  // about to settle against, so A's turn read as the delta SINCE B — 0.15 here
+  // instead of its own 0.25.
+  const sessionA = { id: 'session-a', header: { id: 'session-a' } }
+  const sessionB = { id: 'session-b', header: { id: 'session-b' } }
+  await withEnv({ ...PINS, COMMANDCODE_API_KEY: 'user_test' }, async () => {
+    let totalCredits = 10
+    await withFetch(async url => {
+      if (url.endsWith('/alpha/billing/credits')) {
+        return json({
+          credits: { monthlyCredits: 66 },
+          windowLimits: { fiveHour: { used: 4, cap: 14, resetAt: Date.now() + 3_600_000 } },
+        })
+      }
+      if (url.endsWith('/alpha/billing/subscriptions')) return json({ data: { planId: 'individual-goat' } })
+      return json({ totalCredits })
+    }, async () => {
+      const ctx = hostContext({})
+      apply(ctx, undefined)
+      await settle()
+      ctx.__emit('session/event', sessionA, {
+        type: 'request/header',
+        data: { header: { config: { provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' } } },
+      })
+      await settle(80)
+
+      // A opens a turn and reports its usage; the counter still reads 10.
+      ctx.__emit('session/event', sessionA, { type: 'turn/start', data: { turn: 1 } })
+      ctx.__emit('session/event', sessionA, {
+        type: 'assistant/message',
+        time: Date.now(),
+        data: { turn: 1, step: 1, usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+      })
+      // A's request is booked, then B opens and closes its own turn.
+      totalCredits = 10.1
+      ctx.__emit('session/event', sessionB, { type: 'turn/start', data: { turn: 1 } })
+      ctx.__emit('session/event', sessionB, { type: 'turn/end', data: { turn: 1 } })
+      await settle(120)
+
+      totalCredits = 10.25
+      ctx.__emit('session/event', sessionA, { type: 'turn/end', data: { turn: 1 } })
+      await settle(120)
+
+      // A's own window: 10 -> 10.25, i.e. 0.25 of the counter, not 10.1 -> 10.25.
+      assert.ok(renderLine(ctx).includes('本轮 1.79%(0.2500)'))
+      ctx.__dispose()
+    })
+  })
+})
