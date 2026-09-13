@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: write      # GitHub Release
-  id-token: write      # npm --provenance (Sigstore OIDC)
+  id-token: write      # npm trusted publishing + provenance (OIDC)
 
 jobs:
   publish:
@@ -20,7 +20,6 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          registry-url: https://registry.npmjs.org
 
       - name: Verify tag matches package.json version
         run: |
@@ -37,6 +36,13 @@ jobs:
       - run: pnpm test
       - run: pnpm pack:verify
 
+      # Trusted publishing: the npm CLI exchanges this workflow's short-lived
+      # OIDC token — granted by `id-token: write` above — for a publish
+      # credential, so this repository stores no npm token at all. npm >= 11.5.1
+      # is the version that understands the exchange.
+      - name: Update npm for trusted publishing
+        run: npm install -g npm@11
+
       - name: Publish to npm
         run: |
           VERSION="$(node -p "require('./package.json').version")"
@@ -48,8 +54,6 @@ jobs:
           else
             npm publish --access public --provenance
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         run: gh release create "${GITHUB_REF_NAME}" --generate-notes --latest
