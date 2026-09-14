@@ -65,7 +65,7 @@ below) takes over the whole terminal with a GitHub-style contribution grid:
 | Feature | What it shows |
 | --- | --- |
 | Peak / off-peak clock | The billing window currently in force and a live countdown to the next price switch (`09:00-12:00` / `14:00-18:00` Beijing time, Monday–Friday; weekends are off-peak all day). |
-| Account readout (provider-neutral) | The balance or plan quota of **the provider the focused conversation actually runs through**: an official balance, a subscription's 5-hour/weekly/monthly windows, a relay's credit pool. The provider comes from `request/header.config.provider` in the session log, and its base URL and credential reference are resolved through the harness seams. A provider with no readable interface is simply left off the line — no figure is ever guessed. |
+| Account readout (provider-neutral) | The balance or plan quota of **the provider the focused conversation actually runs through**: an official balance, a subscription's 5-hour/weekly/monthly windows, a relay's credit pool. The provider comes from `request/header.config.provider` in the session log, and its base URL and credential reference are resolved through the harness seams. A conversation restored at boot names no route until its first request (the host replays its history without re-emitting events), so `auto` follows the host's persisted `/model` route — the one the next request will use — until the conversation speaks for itself. A provider with no readable interface is simply left off the line — no figure is ever guessed. |
 | Per-turn cost | What the turn that just finished cost. When the provider exposes a spend counter (Command Code credits, OpenRouter key usage, a relay's used quota) this is **measured** from that counter; otherwise it is estimated from a rate card, and otherwise the line says the model is unrated. The figure follows the conversation you are **focused on**, not the one that last appended an event. |
 | Quota diagnostics `/quota` | One command shows what is being read, which adapter answers, why the last read failed, and every provider route this process could ask about (`/quota check <provider>` probes one on the spot). |
 | Peak-hour warning | Optional. While peak pricing is active the status contribution becomes a rounded frame whose border, phase label and travelling waveform pulse in the chosen color. |
@@ -122,7 +122,7 @@ Main card:
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| Quota provider | text | `auto` | `auto` follows the focused conversation's provider; a provider id (`commandcode`, `openrouter`, …) pins that one; `off` hides the account section. |
+| Quota provider | text | `auto` | `auto` follows the focused conversation's provider, falling back to the host's persisted `/model` route while a restored conversation has not sent its first request; a provider id (`commandcode`, `openrouter`, …) pins that one; `off` hides the account section. |
 | Quota metric | select | `auto` | `auto` (the tightest window), `balance`, `window5h`, `windowWeekly`, `windowDaily`, `windowMonthly`, `planRemaining`, `keyLimit`, `periodSpend`, `lifetimeSpend`, or `rotate` (cycle every meter, one every 8 s). |
 | Turn spend | select | `auto` | `auto` (measured when the provider has a counter), `measured`, `estimate`. |
 | Unofficial endpoints | boolean | `false` | Allow quota reads from endpoints no provider documents publicly (mostly reverse-engineered console APIs). |
@@ -311,6 +311,10 @@ ask it** — and degrades quietly at every step it cannot complete:
 
 1. **Provider** — the focused conversation's last `request/header.config.provider`
    (in `auto` mode; the setting can pin one provider or turn the section off).
+   A conversation restored at boot has published no header yet, so `auto` then
+   uses the host's persisted `/model` route (`~/.dsh-tui/model.json`, the file
+   the picker re-applies after a restart); the built-in `deepseek-official`
+   default is the last resort, for a host that persists no choice at all.
 2. **Endpoint and credential** — the provider's own settings section (pointed at
    by `ctx.llm.listConfigurableProviders()`) → the spec file → the generated
    catalog snapshot. The key is resolved through the `credentials` seam with an
@@ -463,6 +467,12 @@ overrides the file path for tests and diagnostics.
   prepaid balance, the GLM/Kimi coding plans, Claude subscriptions), rather than
   a guessed one. A spec stanza can cover your own deployment or an interface this
   build does not ship.
+- **Before a restored conversation's first request, the account figure comes
+  from the host's `/model` route, not from that conversation.** dsh-tui emits no
+  session event while it replays a restored session's history, so nothing has
+  named that conversation's own provider yet; if the conversation is pinned to a
+  different provider than the `/model` choice, its first request corrects the
+  line.
 - **Only the DeepSeek official and Command Code adapters were verified against a
   real account** (see the table above). The other named adapters are implemented
   from each provider's own documentation and tested with fixture payloads drawn

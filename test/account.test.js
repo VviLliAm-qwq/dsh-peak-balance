@@ -23,6 +23,29 @@ test('the account section can be pinned, turned off, or follow the conversation'
   assert.equal(resolveTarget({ config: { quotaProvider: 'auto' }, provider: '' }).source, 'default')
 })
 
+test('a silent conversation falls back to the host’s persisted /model route', () => {
+  // The restored-conversation case: the host replayed its history privately, so
+  // nothing has named this conversation's route yet. The official default would
+  // report a different account than the one the user is about to spend from.
+  assert.deepEqual(resolveTarget({ config: { quotaProvider: 'auto' }, provider: '', preference: 'commandcode' }), {
+    enabled: true,
+    provider: 'commandcode',
+    source: 'preference',
+  })
+  // What the conversation itself says always wins.
+  assert.equal(
+    resolveTarget({ config: { quotaProvider: 'auto' }, provider: 'openrouter', preference: 'commandcode' }).source,
+    'focus',
+  )
+  // A pinned route outranks both, and `off` stays off.
+  assert.equal(resolveTarget({ config: { quotaProvider: 'moonshot' }, preference: 'commandcode' }).provider, 'moonshot')
+  assert.equal(resolveTarget({ config: { quotaProvider: 'off' }, preference: 'commandcode' }).enabled, false)
+  // An empty or absent preference is not a route.
+  assert.equal(resolveTarget({ config: {}, provider: '', preference: '' }).source, 'default')
+  assert.equal(resolveTarget({ config: {}, provider: '', preference: '   ' }).source, 'default')
+  assert.equal(resolveTarget({ config: {}, provider: '' }).source, 'default')
+})
+
 /* -------------------------------------------------------------- collect */
 
 test('a provider with no known quota interface fails as unsupported, with the reason', async () => {

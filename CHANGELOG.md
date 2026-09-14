@@ -4,13 +4,31 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.5.3] - 2026-09-14
+
+### Fixed
+
+- **The account section no longer reports a different account's figure on the
+  first page after a restart.** A conversation the host restored at boot has no
+  tracker in this process — the host replays its history privately and DSH emits
+  `session/event` only for appends this process makes — so `auto` fell straight
+  through to the historical `deepseek-official` default. On a machine whose
+  current route is a subscription provider (Command Code, a relay), the first
+  page therefore showed the official API balance until that conversation sent
+  its first request. The target now has a middle tier: focused conversation →
+  the host's persisted `/model` route → `deepseek-official`. The route is read
+  from `~/.dsh-tui/model.json` (the file the picker re-applies after a restart,
+  and only a complete `provider`+`model` pair counts), reported as its own
+  `preference` source in `/quota`, and refreshed with the regular account
+  refresh so a `/model` switch lands within one interval.
+
 ## [0.5.2] - 2026-09-13
 
 ### Changed
 
 - Documentation only, no code change: a CI badge under the title, and the publishing section now records that the release workflow publishes through npm trusted publishing (OIDC) with no stored token.
-
-## [Unreleased]
 
 ## [0.5.1] - 2026-09-13
 

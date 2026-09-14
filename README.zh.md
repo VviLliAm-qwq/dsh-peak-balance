@@ -57,7 +57,7 @@ DeepSeek 峰谷计费时钟 · 实时余额 · 每轮花费 · `/hist` 历史用
 | 功能 | 说明 |
 | --- | --- |
 | 峰谷时钟 | 显示当前计价时段与切换到下一时段的倒计时（北京时间周一至周五 `09:00-12:00`、`14:00-18:00` 为高峰，周末全天谷时）。 |
-| 账户读数（通用） | 按**当前对话实际使用的 provider** 显示余额或套餐额度：官方余额、订阅套餐的 5 小时/周/月窗口、中转站的额度与限额。provider 由会话日志的 `request/header.config.provider` 判定，base URL 与密钥引用经宿主接缝解析；没有可查接口的 provider 直接不显示，**绝不猜数字**。 |
+| 账户读数（通用） | 按**当前对话实际使用的 provider** 显示余额或套餐额度：官方余额、订阅套餐的 5 小时/周/月窗口、中转站的额度与限额。provider 由会话日志的 `request/header.config.provider` 判定，base URL 与密钥引用经宿主接缝解析；开机恢复的对话在发出第一个请求前不会报告自己的路由（宿主重放历史时不再发事件），此时 `auto` 跟随宿主持久化的 `/model` 路由——也就是下一个请求将要走的那条。没有可查接口的 provider 直接不显示，**绝不猜数字**。 |
 | 每轮花费 | 刚结束那一轮对话的花费：provider 有消费计数器时显示**实测扣减**（如 Command Code 的 credits、OpenRouter 的 key 用量、中转站的已用额度），否则按价目估算，都没有就显示「费率未知」。数字跟着你**当前聚焦的对话**走。 |
 | 额度诊断 `/quota` | 一条命令看清算的是什么、谁在应答、上次为什么失败，以及本进程能路由到的全部 provider（`/quota check <provider>` 现场探测）。 |
 | 峰时警告 | 可选。高峰时段生效时，状态行变成圆角边框，边框、时段标签与右侧波形按设定颜色脉动。 |
@@ -103,7 +103,7 @@ dsh plugin --profile dsh-tui add file:/到本仓库的绝对路径/dsh-peak-bala
 
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| Quota provider / 额度来源 | text | `auto` | `auto` 跟随聚焦对话的 provider；填 provider id（如 `commandcode`、`openrouter`）固定其中一个；`off` 隐藏账户那一段。 |
+| Quota provider / 额度来源 | text | `auto` | `auto` 跟随聚焦对话的 provider；恢复的对话还没发出第一个请求时，先跟随宿主持久化的 `/model` 路由；填 provider id（如 `commandcode`、`openrouter`）固定其中一个；`off` 隐藏账户那一段。 |
 | Quota metric / 额度口径 | select | `auto` | `auto`（最紧的窗口）、`balance`、`window5h`、`windowWeekly`、`windowDaily`、`windowMonthly`、`planRemaining`、`keyLimit`、`periodSpend`、`lifetimeSpend`（累计已用）、`rotate`（轮换，每 8 秒换一个口径）。 |
 | Turn spend / 每轮花费口径 | select | `auto` | `auto`（有计数器就实测）、`measured`、`estimate`。 |
 | Unofficial endpoints / 允许非公开端点 | boolean | `false` | 是否允许读取厂商未公开文档的额度端点（多为逆向控制台接口）。 |
@@ -212,7 +212,7 @@ alt+h                                 # 同上（不用打字；聊天状态下�
 
 0.4.0 起，账户那一段不再写死 DeepSeek。插件按下面的顺序决定「问谁、怎么问」，任何一步拿不到就静默降级：
 
-1. **provider** —— 当前聚焦对话最近一次 `request/header.config.provider`（`auto` 模式；也可用设置固定或关掉）。
+1. **provider** —— 当前聚焦对话最近一次 `request/header.config.provider`（`auto` 模式；也可用设置固定或关掉）。开机恢复的对话还没上报过任何 header，此时 `auto` 改用宿主持久化的 `/model` 路由（`~/.dsh-tui/model.json`，即选择器在重启后重新应用的那个文件）；内置的 `deepseek-official` 默认只作最后兜底（宿主完全没保存过选择时）。
 2. **端点与密钥** —— provider 自己的设置段（`ctx.llm.listConfigurableProviders()` 给出的命名空间指针）→ 声明文件 → 内置目录快照。密钥经 `credentials` 接缝解析，失败回落同名环境变量。
 3. **适配器** —— 按下表选择；都不匹配就显示「无接口」（只有你显式指定了该 provider 时才显示这一行）。
 
@@ -308,6 +308,7 @@ OpenRouter 的 `/credits` 需要**管理密钥**（普通 key 会 403）；插�
 - 花费为基于 token 用量的估算，实际扣费以 DeepSeek 平台账单为准。
 - 价目表内置在包内，官方调价需要插件更新；未收录的模型需要你自己用 `/hist price set` 补单价。
 - 账户那一段依赖 provider 自己的接口：**没有公开额度接口的 provider 不会显示任何数字**（OpenAI、Gemini、Anthropic 预付费余额、GLM/Kimi 编程套餐、Claude 订阅等），而不是显示一个猜出来的值。可以用声明文件接入自家部署或未内置的接口。
+- **恢复的对话在发出第一个请求之前，账户数字来自宿主的 `/model` 路由，而不是这个对话本身**：dsh-tui 重放已恢复会话的历史时不发会话事件，所以还没有任何东西报出这个对话自己的 provider。若该对话被单独固定到与 `/model` 选择不同的 provider，它的第一个请求会把状态行纠正过来。
 - **只有 DeepSeek 官方与 Command Code 两个适配器经过真实账户核对**（见上文表格）；其余具名适配器按各自官方文档实现，并用文档/源码里的夹具 payload 测试，未经真实账户核对。
 - **非公开端点默认关闭**：spec 里声明 `"allowUnofficial": true` 的 provider，只有在全局的 `allowUnofficialQuota` 也打开时才会被访问（如逆向的控制台接口）。Command Code 的 `/alpha/*` 不受该开关限制——那是官方 CLI 自己走的端点。
 - **不内置 Command Code 的价目表**：它的模型目录不带价格、价格页是前端渲染的，编一份出来就是猜。订阅套餐里的模型在 `/hist` 只显示 token，直到你用 `/hist price set commandcode:<model> …` 给出单价；状态行的「本轮」仍然是实测扣减。

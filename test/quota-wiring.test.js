@@ -2,7 +2,20 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { apply } from '../lib/plugin.js'
-import { ABSENT_DSH_HOME, ABSENT_FOCUS_FILE, ABSENT_LANG_FILE, ABSENT_STATE_DIR, makeCtx, makeServices, renderLine, withEnv } from '../test-support/harness.js'
+import {
+  ABSENT_DSH_HOME,
+  ABSENT_FOCUS_FILE,
+  ABSENT_LANG_FILE,
+  ABSENT_MODEL_FILE,
+  ABSENT_STATE_DIR,
+  FIXTURE_SESSION_ID,
+  FOCUS_FIXTURE,
+  MODEL_PREF_FIXTURE,
+  makeCtx,
+  makeServices,
+  renderLine,
+  withEnv,
+} from '../test-support/harness.js'
 
 /** A session object the plugin can key a tracker by. */
 const FAKE_SESSION = { id: 'session-1', header: { id: 'session-1' } }
@@ -14,6 +27,7 @@ const PINS = {
   DSH_TUI_LANG: 'zh',
   DSH_PEAK_BALANCE_FOCUS_FILE: ABSENT_FOCUS_FILE,
   DSH_PEAK_BALANCE_LANG_FILE: ABSENT_LANG_FILE,
+  DSH_PEAK_BALANCE_MODEL_FILE: ABSENT_MODEL_FILE,
   DSH_TUI_STATE_DIR: ABSENT_STATE_DIR,
   DSH_HOME: ABSENT_DSH_HOME,
 }
@@ -62,6 +76,57 @@ test('the account section reports the official balance in its own currency', asy
       ctx.__dispose()
     })
   })
+})
+
+test('a conversation restored at boot reports the host /model route, not the official default', async () => {
+  // The field bug this pins: the host replayed a restored conversation's history
+  // privately (no `session/event`), so no tracker existed for it and the account
+  // section fell back to `deepseek-official` — showing the OFFICIAL balance on
+  // the first page of a session that actually runs through Command Code.
+  await withEnv(
+    {
+      ...PINS,
+      DSH_PEAK_BALANCE_FOCUS_FILE: FOCUS_FIXTURE,
+      DSH_PEAK_BALANCE_MODEL_FILE: MODEL_PREF_FIXTURE,
+      DEEPSEEK_API_KEY: 'sk-test',
+      COMMANDCODE_API_KEY: 'user_test',
+    },
+    async () => {
+      const urls = []
+      await withFetch(async url => {
+        urls.push(String(url))
+        if (url.endsWith('/user/balance')) {
+          return json({
+            is_available: true,
+            balance_infos: [{ currency: 'CNY', total_balance: '12.34', granted_balance: '0', topped_up_balance: '12.34' }],
+          })
+        }
+        if (url.endsWith('/alpha/billing/credits')) {
+          return json({
+            credits: { monthlyCredits: 66 },
+            windowLimits: { fiveHour: { used: 4, cap: 14, resetAt: Date.now() + 3_600_000 } },
+          })
+        }
+        if (url.endsWith('/alpha/billing/subscriptions')) return json({ data: { planId: 'individual-goat' } })
+        return json({ totalCredits: 10 })
+      }, async () => {
+        const ctx = hostContext({})
+        apply(ctx, undefined)
+        await settle(80)
+        assert.match(renderLine(ctx), /套餐 GOAT/)
+        assert.ok(!urls.some(url => url.endsWith('/user/balance')), 'the official account was never asked about')
+
+        // Once the conversation itself speaks, ITS route wins over the preference.
+        ctx.__emit('session/event', { id: FIXTURE_SESSION_ID, header: { id: FIXTURE_SESSION_ID } }, {
+          type: 'request/header',
+          data: { header: { config: { provider: 'deepseek-official', model: 'deepseek-flash' } } },
+        })
+        await settle(80)
+        assert.match(renderLine(ctx), /余额 ¥12\.34/)
+        ctx.__dispose()
+      })
+    },
+  )
 })
 
 test('a provider switch re-targets the section: the Command Code plan appears', async () => {

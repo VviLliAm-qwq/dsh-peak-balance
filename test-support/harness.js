@@ -39,6 +39,17 @@ export const ABSENT_DSH_HOME = join(here, 'no-such-dsh-home')
  */
 export const ABSENT_LANG_FILE = join(here, 'no-such-lang.json')
 
+/**
+ * A host model-preference file that does not exist, so the account section's
+ * fallback route never comes from the developer's own `/model` choice. Tests
+ * that exercise the preference point `DSH_PEAK_BALANCE_MODEL_FILE` at
+ * {@link MODEL_PREF_FIXTURE} or at a temp file of their own.
+ */
+export const ABSENT_MODEL_FILE = join(here, 'no-such-model-pref.json')
+
+/** Persisted `/model` route fixture (`{ provider, model }`, the host's shape). */
+export const MODEL_PREF_FIXTURE = join(here, 'model-pref.json')
+
 /** Marker fixture naming {@link FIXTURE_SESSION_ID}. */
 export const FOCUS_FIXTURE = join(here, 'focus-marker.txt')
 
@@ -245,8 +256,8 @@ export function withEnv(overrides, body) {
 /**
  * Pin everything that could reach outside the test process: the DeepSeek key
  * (balance lookups), the UI language (both the env pin and the persisted file),
- * the plugin's state directory (the custom rate file) and the focused-session
- * marker.
+ * the plugin's state directory (the custom rate file), the focused-session
+ * marker, and the host's persisted `/model` route.
  */
 export function withoutSecrets(body) {
   withEnv(
@@ -255,6 +266,7 @@ export function withoutSecrets(body) {
       DSH_TUI_LANG: 'zh',
       DSH_PEAK_BALANCE_FOCUS_FILE: ABSENT_FOCUS_FILE,
       DSH_PEAK_BALANCE_LANG_FILE: ABSENT_LANG_FILE,
+      DSH_PEAK_BALANCE_MODEL_FILE: ABSENT_MODEL_FILE,
       DSH_TUI_STATE_DIR: ABSENT_STATE_DIR,
       DSH_HOME: ABSENT_DSH_HOME,
     },
