@@ -246,12 +246,22 @@ real logs):
 
 **Cache.** Activation reads the incremental cache and paints the grid from it, so
 opening the scene is instant; the scan that follows only refreshes what changed.
-The cache is keyed by `(path, size, mtime)` and an up-to-date corpus lands in
-20–30 ms. It lives at `~/.dsh-tui/dsh-peak-balance-history.json` (safe to
-delete — it rebuilds); the one genuinely slow case is that first rebuild on a
-large corpus, which checkpoints as it goes so an interrupted run resumes instead
-of starting over. While the scene is open it re-scans once a minute behind the
-figures (the status line shows `refreshing`); closing it stops that.
+The cache is incremental three ways: a log whose `(path, size, mtime)` is
+unchanged is skipped outright; a log that was only *appended* to is finished
+from the frame the cache stopped at (a `done` offset, guarded by a 16-byte
+signature of the bytes just before it), so only the new frames are decompressed;
+and a cache written by an older version is *migrated* in place rather than
+thrown away. Measured on this machine (437 logs, 112 MB, 190k frames): after the
+largest log grows, a rescan fell from 314 ms to 17 ms, and the first scan after
+a plugin update fell from a full rebuild to 81 ms. An up-to-date corpus lands in
+20–30 ms. The cache lives at `~/.dsh-tui/dsh-peak-balance-history.json` (safe to
+delete — it rebuilds). The one genuinely slow case is that first rebuild on a
+large corpus (≈ 5–6 s here, of which ≈ 4.3 s is decompressing 190k small zstd
+frames one at a time — a Node-side floor); it checkpoints as it goes so an
+interrupted run resumes instead of starting over, and it **paints as it goes**,
+newest logs first, so the recent weeks are on screen within the first second.
+While the scene is open it re-scans once a minute behind the figures (the status
+line shows `refreshing`); closing it stops that.
 
 ## How the numbers are produced
 
@@ -537,9 +547,18 @@ overrides the file path for tests and diagnostics.
   (web chat, other clients, other machines) are not in these logs, and the
   earliest covered day is whatever the local logs still hold.
 - **The first `/th` on a machine with no cache** needs a few seconds for the full
-  scan (341 logs / ~80 MB here ≈ 4–5 s) and shows progress while it runs; the
-  scan checkpoints as it goes, so an interrupted first run resumes. Once the
-  cache exists, opening the scene answers from it immediately.
+  scan (437 logs / ~112 MB here ≈ 5–6 s, of which ≈ 4.3 s is the frame-by-frame
+  zstd decode) and shows progress while it runs; the scan checkpoints as it goes,
+  so an interrupted first run resumes, and it paints as it goes, newest logs
+  first, so the recent weeks appear within the first second. Once the cache
+  exists, opening the scene answers from it immediately. A cache written by an
+  older plugin version is migrated rather than rebuilt; only a version with no
+  migration path is discarded and rescanned.
+- **A freshly forked log that still has exactly two frames cannot be continued
+  from its cached prefix.** Its first frame is the session header and its second
+  is the `session/end-seed` cut marker, so a prefix that holds only the header
+  does not say where the fork cut is; the plugin re-reads such a log whole (a
+  cost measured in hundreds of bytes).
 - **Mouse hover needs the full-screen (alternate screen) layout** — the profile
   ships `fullscreen: true`. In inline mode the keyboard (`←/→/↑/↓`) selects days
   and shows the same detail card.

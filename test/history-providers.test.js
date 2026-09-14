@@ -178,11 +178,31 @@ test('a provider-qualified custom rate wins over the bare model id', () => {
   assert.equal(rateSourceForKey('commandcode/deepseek/deepseek-v4.1-flash', { 'deepseek-v4.1-flash': custom['deepseek-flash'] }, MONDAY_NOON, 'commandcode', 'deepseek/deepseek-v4.1-flash'), 'custom')
 })
 
-test('the history cache version was bumped for the bucket-key encoding', async () => {
-  const { CACHE_VERSION } = await import('../lib/history-scan.js')
+test('the cache refuses the bucket-key encoding it cannot read and migrates the one it can', async () => {
+  const { CACHE_MIGRATIONS, CACHE_VERSION, parseCache } = await import('../lib/history-scan.js')
   const { BARE_KEY_PREFIX } = await import('../lib/history.js')
   // v2 documents store a provider-less slashed model as `a/b`, which the v3
-  // split would read as provider `a`; the version bump is what retires them.
-  assert.equal(CACHE_VERSION, 3)
+  // split reads as provider `a`. Nothing in the document says which keys were
+  // bare, so no migration can repair it: v2 has no path forward and is refused.
   assert.equal(BARE_KEY_PREFIX, '/')
+  assert.equal(CACHE_MIGRATIONS[2], undefined)
+  const v2 = parseCache(JSON.stringify({ version: 2, files: { a: { mtimeMs: 1, record: { id: 'old', models: {} } } } }))
+  assert.deepEqual(v2.files, {})
+
+  // v3 → v4 added the resume point, which an old entry simply does not have:
+  // its records carry over, so a plugin update no longer costs a full rescan.
+  assert.equal(CACHE_VERSION, 4)
+  assert.equal(typeof CACHE_MIGRATIONS[3], 'function')
+  const v3 = parseCache(JSON.stringify({
+    version: 3,
+    builtAt: 7,
+    files: { a: { size: 2, mtimeMs: 1, record: { id: 'ok', models: {} } } },
+  }))
+  assert.equal(v3.migratedFrom, 3)
+  assert.equal(v3.builtAt, 7)
+  assert.deepEqual(Object.keys(v3.files), ['a'])
+  assert.equal(v3.files.a.record.id, 'ok')
+  assert.equal(v3.files.a.done, undefined)
+  // A document from the future is not a document this version can read.
+  assert.deepEqual(parseCache(JSON.stringify({ version: CACHE_VERSION + 1, files: { a: { record: {} } } })).files, {})
 })

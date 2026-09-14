@@ -6,10 +6,12 @@ import { join } from 'node:path'
 import { zstdCompressSync } from 'node:zlib'
 
 import {
+  CACHE_MIGRATIONS,
   CACHE_VERSION,
   ZSTD_MAGIC,
   collectLogFiles,
   decodeLog,
+  extractLogEvents,
   frameSize,
   historyCachePath,
   isSessionLogName,
@@ -17,10 +19,13 @@ import {
   parseCache,
   parseEvents,
   readCache,
+  readSessionLog,
   recordFromBuffer,
   recordsFromCache,
+  resumeOffsetOf,
   scanSessions,
   sessionsRoot,
+  tailSignatureAt,
   writeCache,
 } from '../lib/history-scan.js'
 
@@ -169,6 +174,155 @@ test('recordFromBuffer folds one stored log', () => {
   assert.equal(noisy.badLines, 1)
 })
 
+test('the filtered reading matches the reference one, minus the lines it never parses', () => {
+  const later = USAGE.time + 60_000
+  const buffer = logBuffer([
+    SESSION,
+    HEADER,
+    USAGE,
+    { type: 'tool/result', seq: 2, time: USAGE.time, data: { text: 'x'.repeat(500) } },
+    'not json at all, and no marker either',
+    { ...USAGE, seq: 3, time: later },
+  ])
+  const reference = recordFromBuffer(buffer)
+  const filtered = readSessionLog(buffer).record
+  // Every number the board reads is identical...
+  for (const key of ['id', 'subagent', 'seeded', 'createdAt', 'lastTime', 'models', 'events', 'skipped', 'failedFrames', 'truncated']) {
+    assert.deepEqual(filtered[key], reference[key])
+  }
+  assert.equal(filtered.events, 2)
+  assert.equal(filtered.lastTime, later)
+  // ...except the diagnostic, by design: the reference parses every line and so
+  // counts garbage that cannot name an event, which the scan never looks at.
+  assert.equal(reference.badLines, 1)
+  assert.equal(filtered.badLines, 0)
+  // A malformed line that *could* name an event is still counted.
+  const broken = readSessionLog(logBuffer([SESSION, '{"type":"assistant/message", broken'])).record
+  assert.equal(broken.badLines, 1)
+})
+
+test('extractLogEvents reports the frame boundary a resume would continue from', () => {
+  const buffer = logBuffer([SESSION, HEADER, USAGE])
+  const whole = extractLogEvents(buffer)
+  assert.equal(whole.frames, 3)
+  assert.equal(whole.events.length, 3)
+  assert.equal(whole.done, buffer.length)
+  assert.equal(whole.truncated, false)
+
+  // A half-written trailing frame is reported, and never advances the point.
+  const partial = extractLogEvents(Buffer.concat([buffer, frame(JSON.stringify(USAGE)).subarray(0, 10)]))
+  assert.equal(partial.truncated, true)
+  assert.equal(partial.failedFrames, 1)
+  assert.equal(partial.done, buffer.length)
+
+  // Reading from a resume point sees only what follows it.
+  const grown = Buffer.concat([buffer, frame(JSON.stringify({ ...USAGE, seq: 4 }))])
+  const tailOnly = extractLogEvents(grown, { start: buffer.length })
+  assert.equal(tailOnly.events.length, 1)
+  assert.equal(tailOnly.done, grown.length)
+
+  // Plaintext logs have no frames: read whole, and never resumed.
+  const plainText = '{"type":"session","id":"p"}\n'
+  const plain = extractLogEvents(Buffer.from(plainText))
+  assert.equal(plain.events.length, 1)
+  assert.equal(plain.frames, 0)
+  assert.equal(plain.done, plainText.length)
+
+  assert.equal(tailSignatureAt(Buffer.from('abcdef'), 0), '')
+  assert.equal(tailSignatureAt(Buffer.from('abcdef'), 6), Buffer.from('abcdef').toString('base64'))
+  assert.equal(tailSignatureAt(Buffer.from('abcdef'), 99), undefined)
+})
+
+test('a log that only grew is finished from its cached prefix', () => {
+  const first = logBuffer([SESSION, HEADER, USAGE])
+  const entry = readSessionLog(first)
+  assert.equal(entry.resumed, false)
+  assert.equal(entry.done, first.length)
+  assert.equal(entry.tail, tailSignatureAt(first, first.length))
+  assert.equal(entry.record.events, 1)
+
+  const grown = Buffer.concat([first, frame(JSON.stringify({ ...USAGE, seq: 4, time: USAGE.time + 60_000 }))])
+  assert.equal(resumeOffsetOf(grown, entry), first.length)
+  const resumed = readSessionLog(grown, { resume: entry })
+  assert.equal(resumed.resumed, true)
+  assert.equal(resumed.done, grown.length)
+  // Continuing a prefix has to land on exactly what a full read produces.
+  assert.deepEqual(resumed.record, recordFromBuffer(grown))
+  assert.equal(resumed.record.events, 2)
+  // The cached record is not folded into in place: a scan that discards this
+  // entry must not leave a half-updated record behind.
+  assert.equal(entry.record.events, 1)
+
+  // Nothing to continue from, or a prefix that was rewritten instead of
+  // appended to, or a file that shrank: all read whole again.
+  assert.equal(resumeOffsetOf(grown, undefined), undefined)
+  assert.equal(resumeOffsetOf(grown, { record: entry.record, done: 10, tail: '' }), undefined)
+  assert.equal(resumeOffsetOf(grown, { ...entry, carry: undefined }), undefined)
+  assert.equal(resumeOffsetOf(grown, { ...entry, done: 0 }), undefined)
+  assert.equal(resumeOffsetOf(grown, { ...entry, done: grown.length + 10 }), undefined)
+  // A hand-edited document must not get as far as folding into a non-record.
+  assert.equal(resumeOffsetOf(grown, { ...entry, record: 7 }), undefined)
+  assert.equal(resumeOffsetOf(grown, { ...entry, record: [] }), undefined)
+  const tampered = Buffer.from(grown)
+  tampered[tampered.length - 1] ^= 0xff
+  assert.equal(resumeOffsetOf(tampered, { ...entry, done: grown.length - 1 }), undefined)
+  const shrunk = readSessionLog(first.subarray(0, first.length - 5), { resume: entry })
+  assert.equal(shrunk.resumed, false)
+})
+
+test('a fork-seeded log continues under the same cut', () => {
+  const header = { type: 'session', id: 'child', createdAt: USAGE.time, seedLength: 4 }
+  const buffer = logBuffer([
+    header,
+    HEADER,
+    { ...USAGE, seq: 1 },
+    { ...USAGE, seq: 3 },
+    { ...USAGE, seq: 4, time: USAGE.time + 1000 },
+  ])
+  const entry = readSessionLog(buffer)
+  assert.equal(entry.record.events, 1)
+  assert.equal(entry.record.skipped, 2)
+
+  const grown = Buffer.concat([buffer, frame(JSON.stringify({ ...USAGE, seq: 5, time: USAGE.time + 2000 }))])
+  const resumed = readSessionLog(grown, { resume: entry })
+  assert.equal(resumed.resumed, true)
+  assert.deepEqual(resumed.record, recordFromBuffer(grown))
+  assert.equal(resumed.record.events, 2)
+  assert.equal(resumed.record.skipped, 2)
+
+  // The legacy header (`isSeeded` with no `seedLength`) leaves the cut resolved
+  // by a marker that may still arrive, so such a log is never continued.
+  const legacy = logBuffer([{ ...SESSION, isSeeded: true }, HEADER, USAGE])
+  const legacyEntry = readSessionLog(legacy)
+  assert.equal(legacyEntry.carry.seedUnresolved, true)
+  assert.equal(resumeOffsetOf(Buffer.concat([legacy, frame(JSON.stringify(USAGE))]), legacyEntry), undefined)
+
+  // That cut marker has to survive the line filter too: `session/end-seed` is
+  // reached by an exact type test only because {@link RELEVANT_TYPES} names it.
+  const marked = logBuffer([
+    { ...SESSION, isSeeded: true },
+    HEADER,
+    { ...USAGE, seq: 1 },
+    { type: 'session/end-seed', seq: 2 },
+    { ...USAGE, seq: 3, time: USAGE.time + 1000 },
+  ])
+  const markedRecord = readSessionLog(marked).record
+  assert.equal(markedRecord.seeded, true)
+  assert.equal(markedRecord.events, 1)
+  assert.equal(markedRecord.skipped, 1)
+  assert.deepEqual(markedRecord, recordFromBuffer(marked))
+})
+
+test('a line that does not open with its type is still read', () => {
+  // Anything the host writes opens with `type`, but a hand-edited or foreign log
+  // need not: the marker scan behind the prefix test catches it either way.
+  const odd = JSON.stringify({ seq: 5, time: USAGE.time, type: 'assistant/message', data: { usage: { inputTokens: 3 } } })
+  const buffer = logBuffer([SESSION, HEADER, odd])
+  const record = readSessionLog(buffer).record
+  assert.equal(record.events, 1)
+  assert.deepEqual(record, recordFromBuffer(buffer))
+})
+
 test('listLogFiles walks nested directories newest first and ignores other files', () => {
   const tree = makeTree()
   try {
@@ -222,6 +376,95 @@ test('scanSessions reuses the incremental cache and rescans only changed files',
     assert.equal(fourth.stats.files, 3)
     assert.equal(fourth.stats.scanned, 1)
     assert.equal(fourth.stats.reused, 2)
+  } finally {
+    tree.cleanup()
+  }
+})
+
+test('the scan continues an appended log instead of re-reading it', async () => {
+  const tree = makeTree()
+  try {
+    const cachePath = historyCachePath({ DSH_TUI_STATE_DIR: tree.stateDir })
+    const first = await scanSessions({ root: tree.root, cachePath })
+    assert.equal(first.stats.resumedFiles, 0)
+
+    // Appending to a log leaves its prefix cached, so the rescan decodes the new
+    // frames only — and has to land on the same record a full read would.
+    const target = join(tree.root, '--work--', 's1', 'session.jsonl.zstd')
+    const grown = Buffer.concat([readFileSync(target), frame(JSON.stringify({ ...USAGE, seq: 2, time: USAGE.time + 60_000 }))])
+    writeFileSync(target, grown)
+    const again = await scanSessions({ root: tree.root, cachePath })
+    assert.equal(again.stats.scanned, 1)
+    assert.equal(again.stats.reused, 1)
+    assert.equal(again.stats.resumedFiles, 1)
+    const grownRecord = again.records.find(record => record.id === 's1')
+    assert.deepEqual(grownRecord, recordFromBuffer(grown))
+    assert.equal(grownRecord.events, 2)
+
+    // The entry a resumed read writes is itself resumable again.
+    const entry = readCache({ cachePath }).files['--work--/s1/session.jsonl.zstd']
+    assert.equal(entry.done, grown.length)
+    assert.equal(entry.tail, tailSignatureAt(grown, grown.length))
+  } finally {
+    tree.cleanup()
+  }
+})
+
+test('a cache written by the previous version is migrated instead of rescanned', async () => {
+  const tree = makeTree()
+  try {
+    const cachePath = historyCachePath({ DSH_TUI_STATE_DIR: tree.stateDir })
+    const first = await scanSessions({ root: tree.root, cachePath })
+
+    // Rewrite the document the way v3 wrote one: same records, no resume point.
+    const document = JSON.parse(readFileSync(cachePath, 'utf8'))
+    for (const entry of Object.values(document.files)) {
+      delete entry.done
+      delete entry.tail
+      delete entry.carry
+      delete entry.stats
+    }
+    document.version = 3
+    writeFileSync(cachePath, JSON.stringify(document))
+
+    const again = await scanSessions({ root: tree.root, cachePath })
+    assert.equal(again.stats.migratedFrom, 3)
+    // Migrated, not discarded: a plugin update must not cost a corpus rebuild.
+    assert.equal(again.stats.reused, 2)
+    assert.equal(again.stats.scanned, 0)
+    assert.equal(again.stats.events, first.stats.events)
+    // The migrated entries still hold their records...
+    assert.equal(recordsFromCache(readCache({ cachePath })).length, 2)
+    // ...but no resume point, so the first append re-reads the log and earns one.
+    assert.equal(readCache({ cachePath }).files['--work--/s1/session.jsonl.zstd'].done, undefined)
+  } finally {
+    tree.cleanup()
+  }
+})
+
+test('a cold scan reports what it has reduced so far, a cached one does not', async () => {
+  const tree = makeTree()
+  try {
+    const cachePath = historyCachePath({ DSH_TUI_STATE_DIR: tree.stateDir })
+    const snapshots = []
+    const first = await scanSessions({
+      root: tree.root,
+      cachePath,
+      onRecords: (records, progress) => snapshots.push({ records, progress }),
+    })
+    // One snapshot per decoded file, the last of which is what the caller is
+    // about to receive anyway — a board can paint itself while the scan runs.
+    assert.equal(snapshots.length, 2)
+    assert.equal(snapshots[0].records.length, 1)
+    assert.equal(snapshots[1].records.length, 2)
+    assert.equal(snapshots[1].progress.total, 2)
+    assert.deepEqual(snapshots.at(-1).records.map(record => record.id), first.records.map(record => record.id))
+
+    // Nothing decoded, nothing to report: the scan that finds a fresh cache does
+    // not repaint a board it has no news for.
+    const quiet = []
+    await scanSessions({ root: tree.root, cachePath, onRecords: records => quiet.push(records) })
+    assert.deepEqual(quiet, [])
   } finally {
     tree.cleanup()
   }

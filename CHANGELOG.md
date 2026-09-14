@@ -6,6 +6,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-14
+
+### Changed
+
+- **A scan no longer re-reads a log it has already read.** The incremental cache
+  now remembers, per log, how far into the file its record has been folded
+  (`done`), a signature of the bytes just before that point, and the fold state
+  to continue with. A log that was only *appended* to — every session that is
+  still running, including the one `/hist` is open in — is finished by
+  decompressing its new frames instead of the whole file. On the machine this was
+  written on (437 logs, 112 MB, 190k frames) a refresh after the largest log grew
+  fell from 314 ms to 17 ms, and the same round of appends across three large logs
+  fell from 561 ms to 6 ms. A prefix is continued only when its bytes are
+  provably unchanged (that signature), the file did not shrink, the fold saw the
+  session header, and its fork cut resolved; anything else re-reads the log
+  whole, which is what keeps a continued record byte-identical to a full read.
+- **A cache written by an older version is migrated instead of discarded.**
+  `CACHE_VERSION` is 4 and `CACHE_MIGRATIONS` upgrades a document entry by entry;
+  a version with no migration step is still refused, exactly as before. This is
+  what 0.5.1 lacked: bumping the version there retired every entry and made the
+  next `/hist` rebuild the whole corpus (~12 s on the corpus above), while
+  upgrading to 0.6.0 keeps all 436 entries in place and costs 81 ms.
+- **Only lines that can change a record are parsed.** A frame that cannot carry
+  `assistant/message`, `request/header`, `session` or `session/end-seed` is
+  dropped before it is even turned into a string, and a line is decided by its
+  leading `"type"` when the writer put that key first (the host does), falling
+  back to a marker scan otherwise. In a real corpus ~95% of the lines are never
+  handed to `JSON.parse`. A full rebuild still costs ~5–6 s there, because
+  ~4.3 s of it is decompressing the frames one at a time: Node's
+  `zstdDecompressSync` decodes a single frame per call, and its zstd *stream*
+  refuses a chunk holding more than one (`Unknown frame descriptor`), so the
+  per-frame call is not a choice this plugin can avoid.
+- **A cold rebuild now paints as it goes.** `scanSessions` reports the records it
+  has reduced on the same coalesced ticks as its progress, and `/hist` publishes
+  each batch, so a board with no cache shows the recent weeks within the first
+  second instead of holding a loading state for the whole scan. The walk visits
+  the newest logs first, so each snapshot is already in the order the caller
+  finally receives.
+
 ## [0.5.3] - 2026-09-14
 
 ### Fixed
