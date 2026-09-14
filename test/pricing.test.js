@@ -38,7 +38,11 @@ test('rateCardFor resolves live, legacy and provider-prefixed ids', () => {
   assert.equal(rateCardFor('deepseek-official/deepseek-flash'), FLASH_RATES)
   assert.equal(rateCardFor('deepseek-v4-flash'), FLASH_RATES)
   assert.equal(rateCardFor('deepseek-v4-flash-vision-exp'), FLASH_RATES)
-  assert.equal(rateCardFor('deepseek-v4-pro'), PRO_RATES)
+  // Pinned BEFORE the retirement instant: this case asserts that the id still
+  // resolves to the Pro card, not what the calendar says about it — reading the
+  // clock here made the suite fail on the day the route retired, which is the
+  // next test's business.
+  assert.equal(rateCardFor('deepseek-v4-pro', PRO_ROUTES_TO_FLASH_AT - 1), PRO_RATES)
 })
 
 test('unknown models stay unrated instead of guessing', () => {
