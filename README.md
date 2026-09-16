@@ -483,6 +483,12 @@ overrides the file path for tests and diagnostics.
   named that conversation's own provider yet; if the conversation is pinned to a
   different provider than the `/model` choice, its first request corrects the
   line.
+- **A fresh environment that has not sent a request yet falls back to the
+  `deepseek-official` route**: with no `~/.dsh-tui/model.json` preference and no
+  session event yet, that is the only route the host can report. So if you intend
+  to use another provider and have not configured a DeepSeek key, the account
+  section reads as "no key configured" until your first request names the real
+  provider. Nothing breaks — the line corrects itself after that request.
 - **Only the DeepSeek official and Command Code adapters were verified against a
   real account** (see the table above). The other named adapters are implemented
   from each provider's own documentation and tested with fixture payloads drawn

@@ -309,6 +309,7 @@ OpenRouter 的 `/credits` 需要**管理密钥**（普通 key 会 403）；插�
 - 价目表内置在包内，官方调价需要插件更新；未收录的模型需要你自己用 `/hist price set` 补单价。
 - 账户那一段依赖 provider 自己的接口：**没有公开额度接口的 provider 不会显示任何数字**（OpenAI、Gemini、Anthropic 预付费余额、GLM/Kimi 编程套餐、Claude 订阅等），而不是显示一个猜出来的值。可以用声明文件接入自家部署或未内置的接口。
 - **恢复的对话在发出第一个请求之前，账户数字来自宿主的 `/model` 路由，而不是这个对话本身**：dsh-tui 重放已恢复会话的历史时不发会话事件，所以还没有任何东西报出这个对话自己的 provider。若该对话被单独固定到与 `/model` 选择不同的 provider，它的第一个请求会把状态行纠正过来。
+- **全新环境、还没发出任何请求时会落到 `deepseek-official` 路由**：既没有 `~/.dsh-tui/model.json` 偏好、也还没有任何会话事件时，宿主只报得出这一条路由。所以你若打算用别家 provider、又没配 DeepSeek 密钥，账户那一段会先显示「未配置密钥」，直到你的第一个请求报出真正的 provider——不会出错，那个请求之后状态行自己会纠正。
 - **只有 DeepSeek 官方与 Command Code 两个适配器经过真实账户核对**（见上文表格）；其余具名适配器按各自官方文档实现，并用文档/源码里的夹具 payload 测试，未经真实账户核对。
 - **非公开端点默认关闭**：spec 里声明 `"allowUnofficial": true` 的 provider，只有在全局的 `allowUnofficialQuota` 也打开时才会被访问（如逆向的控制台接口）。Command Code 的 `/alpha/*` 不受该开关限制——那是官方 CLI 自己走的端点。
 - **不内置 Command Code 的价目表**：它的模型目录不带价格、价格页是前端渲染的，编一份出来就是猜。订阅套餐里的模型在 `/hist` 只显示 token，直到你用 `/hist price set commandcode:<model> …` 给出单价；状态行的「本轮」仍然是实测扣减。
