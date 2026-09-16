@@ -10,9 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- **The unused `@deepseek-ai/cordis` peer/dev dependency is gone.** Nothing under
-  `lib/` imports it — the entry exports exactly `{ Config, apply, name }` — so
-  declaring it asked every install to satisfy a peer this plugin never resolves.
 - **README (`Known limitations`, both languages): a fresh environment that has
   not sent a request yet falls back to the `deepseek-official` route.** With no
   `~/.dsh-tui/model.json` preference and no session event, that is the only route
